@@ -1,0 +1,7 @@
+node_modules/
+.fyren/
+*.db
+*.db-wal
+*.db-shm
+dist/
+.env

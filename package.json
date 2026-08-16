@@ -1,0 +1,40 @@
+{
+  "name": "fyren-ai",
+  "version": "0.0.1",
+  "description": "fyren — a token profiler for LLM and agent developers. Local-first, zero-config. (npm package name is fyren-ai; the product is called fyren.)",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "fyren": "./bin/fyren.ts"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "example": "node examples/basic-run.ts",
+    "example:cost": "node examples/cost-breakdown.ts",
+    "example:real": "node examples/run-real-agent.ts",
+    "example:ollama": "node examples/run-ollama-agent.ts"
+  },
+  "keywords": [
+    "llm",
+    "tokens",
+    "profiler",
+    "observability",
+    "anthropic",
+    "claude",
+    "agents"
+  ],
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
