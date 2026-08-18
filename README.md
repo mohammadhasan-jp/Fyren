@@ -442,4 +442,11 @@ I do not have a funded `ANTHROPIC_API_KEY` in this environment — the one real 
 
 ## Next
 
-Waste Detection pattern #1 (uncached static content) is done and verified against real Ollama data. Next: pattern #2 (tool output that was never used) and #3 (retries and their cost), then analysis #3 (Version Diff), per PROJECT_CONTEXT.md §4c.
+Waste Detection patterns #1 and #2 are done, both verified against real data. Remaining: pattern #3 (retries and their cost), analysis #3 (Version Diff), and the CLI + local web UI — full scope and acceptance criteria in [PRD.md](./PRD.md), not repeated here.
+
+## More docs
+
+- [PRD.md](./PRD.md) — product scope, requirements, and status, kept current. The source of truth for "what's built and what's planned."
+- [DECISIONS.md](./DECISIONS.md) — every non-obvious technical decision, with why.
+- [AGENT.md](./AGENT.md) — orientation for AI agents (or anyone) picking up this codebase cold.
+- [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) — the original planning session (Persian). Historical; PRD.md has superseded it.
