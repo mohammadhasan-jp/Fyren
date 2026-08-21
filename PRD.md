@@ -89,7 +89,7 @@ Original scope: given two versions of a prompt/agent, show how token usage and b
 
 **CLI — done.** `bin/fyren.ts` (`npx fyren-ai` / `node bin/fyren.ts`, flags `--db`/`--limit`/`--name`/`--help`) prints a runs table, a cost trend across recent runs, and an aggregate cost breakdown, then exits — one command, no subcommands, by deliberate scope decision (see DECISIONS.md). Waste Detection output and a per-run drill-down were left out on purpose, not forgotten; they're the natural next CLI iteration.
 
-**Web UI — not started.** Target experience, from the original plan: `npx fyren-ai` starts a local server and opens a browser automatically, no account, no signup, no data leaving the machine. The scoping questions PRD previously left open are now partly answered — first screen: run list + cost breakdown; auto-open the browser — but the server framework/approach (fitting the zero-dependency, zero-native-module constraint that shaped every other part of this project) is still undecided and needs the same "verify, don't guess" treatment as the provider work did before any code is written.
+**Web UI — done.** `fyren --ui` (`--port`, `--no-open`) starts a local `node:http` server (no framework — researched and confirmed, see DECISIONS.md) and opens the browser automatically to a page showing the same content as the CLI: a runs table, a cost trend chart, and the aggregate cost breakdown, served from one `GET /api/summary` JSON endpoint. Plain HTML/CSS/vanilla JS, no build step, no CDN dependency (a hand-rolled inline SVG chart instead of a charting library, to keep "no data leaving the machine" true without exception). Same deliberate v1 scope as the CLI: no Waste Detection view, no per-run drill-down, no auto-refresh — natural v2 additions.
 
 ## 7. Success criteria for a v1 release
 
@@ -101,5 +101,5 @@ Original scope: given two versions of a prompt/agent, show how token usage and b
 ## 8. Open risks
 
 - **Untested Anthropic/OpenAI cache paths** (§6.5) — the single biggest correctness risk in the project today.
-- **Scope creep on CLI/UI** — this is explicitly the kind of large, ambiguous feature that caused the predecessor project ("JP") to stall, per the original planning notes. Scope it in writing before building.
+- **Scope creep on CLI/UI** — this is explicitly the kind of large, ambiguous feature that caused the predecessor project ("JP") to stall, per the original planning notes. Both were scoped in writing before building (see the plans referenced in DECISIONS.md) and shipped at that scope, not beyond it.
 - **No CI yet.** `npm run check` is manual. Worth automating once the project has a stable enough shape that CI wouldn't just be chasing a moving target.

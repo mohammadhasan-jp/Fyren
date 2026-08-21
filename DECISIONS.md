@@ -249,3 +249,21 @@ Treating OpenAI's numbers additively would count every cached token twice — in
 **Decision:** the CLI's runs table gets its per-run tokens and cost from `RunCostBreakdown` (`totalInputTokens`, `totalOutputTokens`, `totalCostUsd`), never from a `RunNode`'s own `tokens`/`costUsd` fields.
 
 **Why:** caught during a real end-to-end smoke test (per AGENT.md rule #2 — test against real behavior, not just types), not by inspection. A `RunNode` returned by `listRuns()` is the run's *root* node, and per profiler.ts's own design a node stores only its OWN tokens — a run node has none of its own; only its descendant `llm_call` nodes do. Reading `run.tokens`/`run.costUsd` directly therefore always printed `0`/`$0.000000`, silently, right next to a correct nonzero trend line computed from the same data via `costBreakdownRecent()`. The fix: derive the whole table from the already-computed breakdown array instead of the cheaper-looking root fields.
+
+### The web UI has no framework — plain `node:http`, verified against current sources, not assumed
+
+**Decision:** `web/server.ts` is built on `node:http`/`node:fs` directly. No Express, Fastify, or Hono.
+
+**Why:** PRD.md required this to get the same "verify, don't guess" treatment the provider work got, so it was researched rather than assumed from habit. Current sources confirm a zero-dependency `http`+`fs` static/JSON server is still the standard pattern, and nothing a framework adds (routing sugar, middleware) is worth a new dependency in a project whose entire identity is zero runtime deps and zero native modules. The same research confirmed the `open` npm package is itself just `child_process.execFile` with a platform command (`start`/`open`/`xdg-open`) — trivial to inline in `web/open-browser.ts` instead of depending on it.
+
+### Static assets are three hardcoded routes, not a generic file server
+
+**Decision:** `web/server.ts` maps exactly `/`, `/app.js`, `/style.css` to their files by hand. There is no `serveStatic(dir)`-style handler that resolves an arbitrary request path under `web/public/`.
+
+**Why:** a generic static-file handler has to defend against path traversal (`..` segments, symlink escapes, URL-encoding tricks) for a benefit this project doesn't need — there are only ever three files. Hardcoding the map removes that entire attack surface instead of defending it, and is less code than a correct generic version would be. `test/web-ui.test.ts` has a regression test for exactly this (`../../../etc/passwd` 404s).
+
+### `--ui` is a flag on `fyren`, not a new subcommand or a second bin entry
+
+**Decision:** the web UI starts via `fyren --ui`, not `fyren ui` or a separate `fyren-ui` bin entry.
+
+**Why:** "The CLI is one command, no subcommands" was decided and documented above for the terminal report; introducing a subcommand for the web UI would quietly reopen that decision. A boolean mode flag doesn't — it's the same one command, one entry point, doing one of two things depending on a flag, the same category of choice as `--help`. `--port` and `--no-open` follow the same flag-based shape rather than becoming `fyren ui --port` sub-flags.

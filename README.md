@@ -36,13 +36,14 @@ npm install
 
 npm run example        # records a fake agent run and reads it back — no network, no cost
 npm run example:cost   # the cost breakdown, on that same mock run
-npm run check          # typecheck + 167 tests
+npm run check          # typecheck + 172 tests
 
 npm run example:ollama                              # the real thing — free, local, no key needed
 ANTHROPIC_API_KEY=sk-ant-... npm run example:real    # the real thing — hosted, a few cents
 
 node bin/fyren.ts             # terminal summary: recent runs, cost trend, cost breakdown
-node bin/fyren.ts --help      # --db / --limit / --name
+node bin/fyren.ts --ui        # same content, in a browser — starts a local server, opens it for you
+node bin/fyren.ts --help      # --db / --limit / --name / --ui / --port / --no-open
 ```
 
 Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
@@ -59,7 +60,7 @@ Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
 | Providers: Anthropic, OpenAI, Gemini, Ollama | done |
 | Waste detection pattern #3 (retries), analysis #3 (version diff) | not started |
 | CLI (`bin/fyren.ts`) | done |
-| Web UI | not started |
+| Web UI (`fyren --ui`) | done |
 
 | Piece | File |
 |---|---|
@@ -80,6 +81,9 @@ Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
 | Driver — real Anthropic API | `examples/run-real-agent.ts` |
 | Driver — real local Ollama | `examples/run-ollama-agent.ts` |
 | **CLI** (runs table, cost trend, cost breakdown) | `bin/fyren.ts` |
+| **Web UI** server (zero-dependency `node:http`) | `web/server.ts` |
+| Web UI static frontend (vanilla HTML/CSS/JS, no build step) | `web/public/` |
+| Cross-platform browser auto-open | `web/open-browser.ts` |
 
 ## Requirements
 
@@ -90,7 +94,7 @@ Two floors, and the higher one wins:
 - `node:sqlite` is unflagged from **22.13**
 - native TypeScript execution (type stripping) is unflagged from **22.18**
 
-Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 167.
+Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 172.
 
 **About the SQLite experimental warning.** `node:sqlite` is Stability 1.1 ("active development") on Node 22 and 1.2 ("release candidate") on Node 24.15+. On Node 22 it prints, once:
 
@@ -431,7 +435,7 @@ I do not have a funded `ANTHROPIC_API_KEY` in this environment — the one real 
 
 ## Tests
 
-`npm test` — 167 tests, no network, no API key, run with Node's built-in runner.
+`npm test` — 172 tests, no network, no API key, run with Node's built-in runner.
 
 | File | Covers |
 |---|---|

@@ -16,8 +16,10 @@ import {
   formatCostTrend,
   type RunCostBreakdown,
 } from '../src/index.ts';
+import { startWebUi } from '../web/server.ts';
+import { openBrowser } from '../web/open-browser.ts';
 
-const USAGE = `fyren — local token profiler, terminal summary
+const USAGE = `fyren — local token profiler
 
 Usage: fyren [options]
 
@@ -25,15 +27,23 @@ Options:
   --db <path>     Path to the runs database (default: .fyren/runs.db)
   --limit <n>     Number of recent runs to include (default: 10)
   --name <agent>  Only show runs with this exact name
+  --ui            Start the local web UI instead of the terminal report
+  --port <n>      Web UI port (default: an OS-assigned free port)
+  --no-open       Web UI: don't auto-open the browser
   -h, --help      Show this help
 `;
 
-function main(): void {
+async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
       db: { type: 'string' },
       limit: { type: 'string' },
       name: { type: 'string' },
+      ui: { type: 'boolean' },
+      port: { type: 'string' },
+      // node:util's parseArgs has no automatic --no-x negation (verified —
+      // it throws ERR_PARSE_ARGS_UNKNOWN_OPTION), so --no-open is its own flag.
+      'no-open': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },
   });
@@ -44,6 +54,18 @@ function main(): void {
   }
 
   const dbPath = values.db ?? '.fyren/runs.db';
+
+  if (values.ui) {
+    const port = values.port ? Number(values.port) : 0;
+    if (values.port && (!Number.isInteger(port) || port < 0)) {
+      console.error(`fyren: --port must be a non-negative integer, got "${values.port}"`);
+      process.exitCode = 1;
+      return;
+    }
+    await runWebUi({ dbPath, port, name: values.name, open: !values['no-open'] });
+    return;
+  }
+
   const limit = values.limit ? Number(values.limit) : 10;
   if (!Number.isInteger(limit) || limit < 1) {
     console.error(`fyren: --limit must be a positive integer, got "${values.limit}"`);
@@ -88,6 +110,37 @@ function main(): void {
   }
 }
 
+async function runWebUi(options: {
+  dbPath: string;
+  port: number;
+  name: string | undefined;
+  open: boolean;
+}): Promise<void> {
+  const ui = await startWebUi({ dbPath: options.dbPath, port: options.port, name: options.name });
+
+  let closed = false;
+  const shutdown = (): void => {
+    if (closed) return;
+    closed = true;
+    ui.close();
+  };
+  // Same shutdown discipline as the terminal path's `finally` block — the
+  // profiler's write queue must never be left open on exit.
+  process.once('SIGINT', () => {
+    shutdown();
+    process.exitCode = 0;
+  });
+  process.once('SIGTERM', () => {
+    shutdown();
+    process.exitCode = 0;
+  });
+
+  console.log(`fyren — web UI running at ${ui.url}`);
+  console.log('Press Ctrl+C to stop.');
+
+  if (options.open) openBrowser(ui.url);
+}
+
 function formatRunsTable(breakdowns: readonly RunCostBreakdown[]): string {
   const lines: string[] = [
     '  ' + pad('id', 10) + pad('name', 22) + pad('status', 9) + pad('started', 14) + pad('tokens', 10) + 'cost',
@@ -121,4 +174,7 @@ function pad(text: string, width: number): string {
   return text.length >= width ? `${text} ` : text.padEnd(width);
 }
 
-main();
+main().catch((err: unknown) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exitCode = 1;
+});

@@ -1,0 +1,103 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --row-alt: #f9fafb;
+  --accent: #2563eb;
+  --warn-bg: #fff7ed;
+  --warn-border: #f59e0b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --fg: #e5e7eb;
+    --muted: #9ca3af;
+    --border: #2a2e37;
+    --row-alt: #1c1f26;
+    --accent: #60a5fa;
+    --warn-bg: #2a2210;
+    --warn-border: #b45309;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+h2 {
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 2rem 0 0.75rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--row-alt);
+}
+
+.banner {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+#trend svg {
+  display: block;
+  width: 100%;
+  height: 80px;
+}
+
+#trend .bar {
+  fill: var(--accent);
+}
+
+#trend .trend-summary {
+  margin-top: 0.4rem;
+  color: var(--muted);
+}
