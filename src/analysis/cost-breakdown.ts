@@ -722,6 +722,35 @@ export function formatAggregateCostBreakdown(agg: AggregateCostBreakdown): strin
   return lines.join('\n');
 }
 
+/**
+ * Cost per run over time, oldest to newest — a one-line "is this trending up"
+ * glance for the terminal. Pass `costBreakdownRecent()`'s result directly;
+ * that comes back newest-first, this reverses it to reading order.
+ */
+export function formatCostTrend(breakdowns: readonly RunCostBreakdown[]): string {
+  if (breakdowns.length === 0) return '  (no runs to trend)';
+
+  const chronological = [...breakdowns].reverse();
+  const costs = chronological.map((run) => run.totalCostUsd);
+  const min = Math.min(...costs);
+  const max = Math.max(...costs);
+
+  // Every run costs the same (often everyone's $0 on a free/local provider) —
+  // a flat line, not a divide-by-zero.
+  const flat = max === min;
+  const blocks = '▁▂▃▄▅▆▇█';
+  const sparkline = costs
+    .map((cost) => (flat ? blocks[0] : blocks[Math.round(((cost - min) / (max - min)) * (blocks.length - 1))]))
+    .join('');
+
+  const avg = costs.reduce((sum, cost) => sum + cost, 0) / costs.length;
+
+  return [
+    `  cost trend, oldest → newest (${chronological.length} runs): ${sparkline}`,
+    `    min ${usd(min)}  ·  max ${usd(max)}  ·  avg ${usd(avg)}`,
+  ].join('\n');
+}
+
 function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }

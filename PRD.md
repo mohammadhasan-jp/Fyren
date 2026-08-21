@@ -2,7 +2,7 @@
 
 Status: living document. Supersedes [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) as the source of truth for scope and priorities — that file is kept as historical record of the original planning session, in Persian, and should not be edited going forward. This document is the one to update when scope changes. Every *why* behind a technical choice lives in [DECISIONS.md](./DECISIONS.md), not here — this document says *what* and *for whom*, DECISIONS.md says *why it's built that way*.
 
-Last synced to actual code state: 2026-08-16.
+Last synced to actual code state: 2026-08-21.
 
 ---
 
@@ -85,11 +85,11 @@ Original scope: given two versions of a prompt/agent, show how token usage and b
 
 **Known gap, highest priority to close:** Anthropic's cache-attribution logic (`attributeCall`, the prefix-fill algorithm, `cacheBoundaryUncertain`) is the algorithm the entire Cost Breakdown and Waste Detection analysis is built around — and it has never been run against a real Anthropic cache hit. It has been validated structurally (via Gemini, which shares the "cached tokens as an additive/subset quantity" question) but not against Anthropic itself. Closing this requires a funded `ANTHROPIC_API_KEY`; the project does not have one and has not attempted to acquire one (see AGENT.md's rules on credentials).
 
-### 6.6 CLI + local web UI — **not started**
+### 6.6 CLI + local web UI
 
-Target experience, from the original plan: `npx fyren` (or `npx fyren-ai` — package-name reality, see the naming note in README.md) starts a local server and opens a browser, no account, no signup, no data leaving the machine. Plus a terminal summary table (recent runs, usage, estimated cost) for anyone who doesn't want to leave the terminal.
+**CLI — done.** `bin/fyren.ts` (`npx fyren-ai` / `node bin/fyren.ts`, flags `--db`/`--limit`/`--name`/`--help`) prints a runs table, a cost trend across recent runs, and an aggregate cost breakdown, then exits — one command, no subcommands, by deliberate scope decision (see DECISIONS.md). Waste Detection output and a per-run drill-down were left out on purpose, not forgotten; they're the natural next CLI iteration.
 
-This is the largest remaining unit of work and has not been scoped yet. Before writing code: decide (a) whether a minimal CLI with a nicer terminal report is a worthwhile intermediate milestone before a full web UI, (b) what the web UI's first screen actually needs to show (the tree view? the cost breakdown? both?), (c) what local server framework/approach fits the zero-dependency, zero-native-module constraint that shaped every other part of this project. Do not assume a framework choice; it should get the same "verify, don't guess" treatment as the provider work did.
+**Web UI — not started.** Target experience, from the original plan: `npx fyren-ai` starts a local server and opens a browser automatically, no account, no signup, no data leaving the machine. The scoping questions PRD previously left open are now partly answered — first screen: run list + cost breakdown; auto-open the browser — but the server framework/approach (fitting the zero-dependency, zero-native-module constraint that shaped every other part of this project) is still undecided and needs the same "verify, don't guess" treatment as the provider work did before any code is written.
 
 ## 7. Success criteria for a v1 release
 

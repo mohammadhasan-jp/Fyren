@@ -15,6 +15,7 @@ import {
   aggregateCostBreakdown,
   formatCostBreakdown,
   formatAggregateCostBreakdown,
+  formatCostTrend,
 } from '../src/analysis/cost-breakdown.ts';
 import { createProfiler } from '../src/index.ts';
 import type { InputComposition, RunNode, SegmentSizes, TokenBreakdown } from '../src/index.ts';
@@ -821,4 +822,56 @@ test('profiler.aggregateCostBreakdown applies priceAs uniformly across every fet
   assert.ok(agg.totalCostUsd > 0);
 
   profiler.close();
+});
+
+test('formatCostTrend on an empty array says so, not a crash', () => {
+  assert.equal(formatCostTrend([]), '  (no runs to trend)');
+});
+
+test('formatCostTrend covers a single run: one-block sparkline, min = max = avg', () => {
+  const run = costBreakdown(tree([{ model: 'claude-opus-5', tokens: tokens({ input: 1000, output: 100 }) }]));
+  const out = formatCostTrend([run]);
+  const cost = `$${run.totalCostUsd.toFixed(6)}`;
+
+  assert.ok(out.includes('oldest → newest (1 runs):'));
+  assert.ok(out.includes(`min ${cost}`));
+  assert.ok(out.includes(`max ${cost}`));
+  assert.ok(out.includes(`avg ${cost}`));
+});
+
+test('formatCostTrend on runs that all cost $0 (e.g. every call on a free provider) is a flat line, not a divide-by-zero', () => {
+  const runs = [0, 1, 2].map(() =>
+    costBreakdown(
+      tree([
+        {
+          model: 'qwen2.5:3b',
+          tokens: tokens({ input: 500, output: 50 }),
+          cacheSupported: false,
+        },
+      ]),
+    ),
+  );
+  const out = formatCostTrend(runs);
+
+  assert.ok(out.includes('min $0.000000  ·  max $0.000000  ·  avg $0.000000'));
+  const sparkline = out.split('\n')[0]?.split(': ')[1] ?? '';
+  assert.equal(sparkline.length, 3);
+  assert.equal(new Set(sparkline).size, 1);
+});
+
+test('formatCostTrend reverses newest-first input to chronological order and reports the real min/max/avg', () => {
+  const cheap = costBreakdown(tree([{ model: 'claude-opus-5', tokens: tokens({ input: 100, output: 10 }) }]));
+  const expensive = costBreakdown(
+    tree([{ model: 'claude-opus-5', tokens: tokens({ input: 100_000, output: 10_000 }) }]),
+  );
+  assert.ok(expensive.totalCostUsd > cheap.totalCostUsd);
+
+  // Shaped like costBreakdownRecent()'s output: newest first.
+  const out = formatCostTrend([expensive, cheap]);
+  const avg = (cheap.totalCostUsd + expensive.totalCostUsd) / 2;
+
+  assert.ok(out.includes('oldest → newest (2 runs):'));
+  assert.ok(out.includes(`min $${cheap.totalCostUsd.toFixed(6)}`));
+  assert.ok(out.includes(`max $${expensive.totalCostUsd.toFixed(6)}`));
+  assert.ok(out.includes(`avg $${avg.toFixed(6)}`));
 });

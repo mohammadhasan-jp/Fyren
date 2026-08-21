@@ -54,6 +54,7 @@ export {
   aggregateCostBreakdown,
   formatCostBreakdown,
   formatAggregateCostBreakdown,
+  formatCostTrend,
 } from './analysis/cost-breakdown.ts';
 export type {
   RunCostBreakdown,

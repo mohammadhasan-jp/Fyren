@@ -231,3 +231,21 @@ Treating OpenAI's numbers additively would count every cached token twice — in
 **Decision:** `test/**/*.ts` is listed in `tsconfig.json`'s `include`, alongside `src/` and `examples/`.
 
 **Why:** it was missing for most of this project's early development. `npx tsc --noEmit` reported zero errors the entire time — not because the tests were well-typed, but because `tsc` was never looking at them at all. `node --test` running the tests successfully proved they *ran*, never that their types were sound. Once `test/` was added to `include`, three real missing-field errors surfaced immediately. The lesson generalizes: a "typecheck passes" claim is only as trustworthy as the `include` list backing it — worth checking explicitly, not assumed from a green exit code.
+
+### The CLI (`bin/fyren.ts`) is one command, no subcommands, in v1
+
+**Decision:** `fyren` takes flags (`--db`, `--limit`, `--name`, `--help`) but no subcommands. It always prints the same three things — a runs table, a cost trend, an aggregate cost breakdown — and exits. No `fyren cost <id>`, no `fyren waste`, no `--json`.
+
+**Why:** PRD.md explicitly names CLI/UI scope creep as the biggest process risk this project faces — the predecessor project ("JP") stalled on exactly this kind of open-ended feature. The CLI's own scope was deliberately narrowed to what was explicitly decided (run list + cost breakdown + trend) rather than everything the library could technically expose. Waste Detection output and a per-run drill-down are natural v2 additions, not omissions to apologize for.
+
+### `formatCostTrend()` lives in `cost-breakdown.ts`, not in the CLI or a new file
+
+**Decision:** the cost-trend sparkline formatter is exported from `src/analysis/cost-breakdown.ts`, alongside `formatCostBreakdown`/`formatAggregateCostBreakdown`, not written inline in `bin/fyren.ts`.
+
+**Why:** it is a pure, testable presentation function over `RunCostBreakdown[]` — the same category of code as the other three formatters in that file, and it reuses their private `pad`/`usd` helpers directly without exporting them. Keeping it there also keeps `bin/fyren.ts` a thin wiring layer (parse args → call `Profiler` → call formatters → print), consistent with every other formatter already being public API.
+
+### The runs table reads from `costBreakdownRecent()`, not `listRuns()`'s raw fields
+
+**Decision:** the CLI's runs table gets its per-run tokens and cost from `RunCostBreakdown` (`totalInputTokens`, `totalOutputTokens`, `totalCostUsd`), never from a `RunNode`'s own `tokens`/`costUsd` fields.
+
+**Why:** caught during a real end-to-end smoke test (per AGENT.md rule #2 — test against real behavior, not just types), not by inspection. A `RunNode` returned by `listRuns()` is the run's *root* node, and per profiler.ts's own design a node stores only its OWN tokens — a run node has none of its own; only its descendant `llm_call` nodes do. Reading `run.tokens`/`run.costUsd` directly therefore always printed `0`/`$0.000000`, silently, right next to a correct nonzero trend line computed from the same data via `costBreakdownRecent()`. The fix: derive the whole table from the already-computed breakdown array instead of the cheaper-looking root fields.
