@@ -82,6 +82,9 @@ export type {
   AggregateWasteFinding,
 } from './analysis/waste-detection.ts';
 
+export { diffVersions, formatVersionDiff } from './analysis/version-diff.ts';
+export type { VersionDiffResult, SegmentDelta, ToolCallFrequencyDelta } from './analysis/version-diff.ts';
+
 export { Storage } from './storage.ts';
 export type { ListRunsOptions } from './storage.ts';
 export { WriteQueue } from './queue.ts';

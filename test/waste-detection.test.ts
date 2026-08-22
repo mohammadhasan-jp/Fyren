@@ -28,6 +28,7 @@ import {
   formatAggregateWasteReport,
   type StaticContentWasteFinding,
   type OrphanedToolCallFinding,
+  type RetriedCallFinding,
 } from '../src/analysis/waste-detection.ts';
 import { createProfiler } from '../src/index.ts';
 import type { InputComposition, RunNode, SegmentSizes, TokenBreakdown } from '../src/index.ts';
@@ -48,6 +49,10 @@ function staticFindings(findings: readonly { type: string }[]): StaticContentWas
 /** Narrow to pattern #2 findings. */
 function toolFindings(findings: readonly { type: string }[]): OrphanedToolCallFinding[] {
   return findings.filter((f): f is OrphanedToolCallFinding => f.type === 'orphaned_tool_call');
+}
+/** Narrow to pattern #3 findings. */
+function retryFindings(findings: readonly { type: string }[]): RetriedCallFinding[] {
+  return findings.filter((f): f is RetriedCallFinding => f.type === 'retried_call');
 }
 
 function tree(
@@ -533,6 +538,185 @@ test('formatWasteReport renders orphaned-tool findings, with and without a dolla
   assert.doesNotMatch(textNoCost, /own LLM cost/);
 });
 
+/* ================== pattern #3: retried calls ================== */
+
+test('a failed call with no successor is not flagged — nothing was duplicated', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({
+      id: 'call1',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 4,
+      endedAt: 5,
+      status: 'error',
+      model: 'claude-opus-5',
+    }),
+  ];
+  assert.deepEqual(retryFindings(detectWaste(t).findings), []);
+});
+
+test('a failed call followed by a later same-type, same-name, same-parent call IS flagged', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({
+      id: 'call1',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 4,
+      endedAt: 5,
+      status: 'error',
+      name: 'claude-opus-5',
+      model: 'claude-opus-5',
+      tokens: tokens({ input: 200 }),
+      costUsd: 0.01,
+    }),
+    node({
+      id: 'call2',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 6,
+      endedAt: 7,
+      status: 'ok',
+      name: 'claude-opus-5',
+      model: 'claude-opus-5',
+    }),
+  ];
+  const [finding] = retryFindings(detectWaste(t).findings);
+  assert.ok(finding);
+  assert.equal(finding.nodeType, 'llm_call');
+  assert.equal(finding.name, 'claude-opus-5');
+  assert.equal(finding.wastedAttempts, 1);
+  assert.ok(finding.avoidableCostUsd > 0, 'the failed attempt spent real tokens before erroring');
+});
+
+test('a chain of two failures before a success flags BOTH failed attempts, not just the last', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({ id: 'c1', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 2, endedAt: 3, status: 'error', name: 'claude-opus-5', model: 'claude-opus-5' }),
+    node({ id: 'c2', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 4, endedAt: 5, status: 'error', name: 'claude-opus-5', model: 'claude-opus-5' }),
+    node({ id: 'c3', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 6, endedAt: 7, status: 'ok', name: 'claude-opus-5', model: 'claude-opus-5' }),
+  ];
+  const [finding] = retryFindings(detectWaste(t).findings);
+  assert.ok(finding);
+  assert.equal(finding.wastedAttempts, 2);
+});
+
+test('an errored tool_call with a nested llm_call counts the nested cost, like pattern #2', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({
+      id: 'tool1',
+      type: 'tool_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 2,
+      endedAt: 5,
+      status: 'error',
+      name: 'summarize_and_search',
+    }),
+    node({
+      id: 'nested-llm',
+      type: 'llm_call',
+      parentId: 'tool1',
+      rootId: 'run',
+      startedAt: 3,
+      endedAt: 4,
+      status: 'ok',
+      model: 'claude-opus-5',
+      tokens: tokens({ input: 300, output: 50 }),
+    }),
+    node({
+      id: 'tool2',
+      type: 'tool_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 6,
+      endedAt: 7,
+      status: 'ok',
+      name: 'summarize_and_search',
+    }),
+  ];
+  const [finding] = retryFindings(detectWaste(t).findings);
+  assert.ok(finding);
+  assert.equal(finding.nodeType, 'tool_call');
+  assert.ok(finding.avoidableCostUsd > 0, 'the nested llm_call under the errored tool_call must be counted');
+});
+
+test('a still-running run whose failed call has no successor YET is not flagged — same "nothing to compare against" logic as pattern #1, no special-casing needed', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: null, status: 'running' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: null, status: 'running' }),
+    node({
+      id: 'call1',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 4,
+      endedAt: 5,
+      status: 'error',
+      model: 'claude-opus-5',
+    }),
+  ];
+  assert.deepEqual(retryFindings(detectWaste(t).findings), []);
+});
+
+test('two DIFFERENT tools/models under the same parent are never conflated as a retry of each other', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({ id: 'search', type: 'tool_call', parentId: 'step', rootId: 'run', startedAt: 2, endedAt: 3, status: 'error', name: 'search' }),
+    node({ id: 'fetch', type: 'tool_call', parentId: 'step', rootId: 'run', startedAt: 4, endedAt: 5, status: 'ok', name: 'fetch' }),
+  ];
+  assert.deepEqual(retryFindings(detectWaste(t).findings), []);
+});
+
+test('priceAs re-prices a retried call under a hypothetical model, labeled as such', () => {
+  const t = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({
+      id: 'call1',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 2,
+      endedAt: 3,
+      status: 'error',
+      name: 'unpriced-local-model',
+      model: 'unpriced-local-model',
+      tokens: tokens({ input: 500 }),
+    }),
+    node({
+      id: 'call2',
+      type: 'llm_call',
+      parentId: 'step',
+      rootId: 'run',
+      startedAt: 4,
+      endedAt: 5,
+      status: 'ok',
+      name: 'unpriced-local-model',
+      model: 'unpriced-local-model',
+    }),
+  ];
+  const report = detectWaste(t, { priceAs: 'claude-haiku-4-5' });
+  const [finding] = retryFindings(report.findings);
+  assert.ok(finding);
+  assert.ok(finding.avoidableCostUsd > 0);
+  assert.equal(report.pricingMode, 'hypothetical');
+
+  const text = formatWasteReport(report);
+  assert.match(text, /retried model call — "unpriced-local-model" failed 1 time\(s\)/);
+  assert.match(text, /\(hypothetical\)/);
+});
+
 /* ================== aggregation ================== */
 
 test('aggregateWaste sums across runs and ranks findings by dollar impact', () => {
@@ -586,6 +770,29 @@ test('aggregateWaste rolls up orphaned-tool-call findings across runs, separatel
   assert.ok(finding && finding.type === 'orphaned_tool_call');
   assert.equal(finding.affectedRunCount, 2, 'both runs had this tool orphaned at least once');
   assert.equal(finding.totalOccurrences, 3, '1 + 2');
+});
+
+test('aggregateWaste rolls up retried-call findings across runs, keyed by nodeType+name so a tool and a model never collide', () => {
+  const runA = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok', name: 'agent' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({ id: 'c1', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 2, endedAt: 3, status: 'error', name: 'claude-opus-5', model: 'claude-opus-5' }),
+    node({ id: 'c2', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 4, endedAt: 5, status: 'ok', name: 'claude-opus-5', model: 'claude-opus-5' }),
+  ];
+  const runB = [
+    node({ id: 'run', type: 'run', parentId: null, rootId: 'run', startedAt: 0, endedAt: 100, status: 'ok', name: 'agent' }),
+    node({ id: 'step', type: 'step', parentId: 'run', rootId: 'run', startedAt: 1, endedAt: 100 }),
+    node({ id: 'c1', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 2, endedAt: 3, status: 'error', name: 'claude-opus-5', model: 'claude-opus-5' }),
+    node({ id: 'c2', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 4, endedAt: 5, status: 'error', name: 'claude-opus-5', model: 'claude-opus-5' }),
+    node({ id: 'c3', type: 'llm_call', parentId: 'step', rootId: 'run', startedAt: 6, endedAt: 7, status: 'ok', name: 'claude-opus-5', model: 'claude-opus-5' }),
+  ];
+
+  const agg = aggregateWaste([detectWaste(runA), detectWaste(runB)]);
+  const finding = agg.findings.find((f) => f.type === 'retried_call');
+  assert.ok(finding && finding.type === 'retried_call');
+  assert.equal(finding.affectedRunCount, 2);
+  assert.equal(finding.totalWastedAttempts, 3, '1 + 2');
+  assert.match(formatAggregateWasteReport(agg), /"claude-opus-5" retried in 2 of 2 run\(s\), 3 failed attempt\(s\) total/);
 });
 
 test('aggregateWaste on runs with no findings at all degrades gracefully', () => {
@@ -675,5 +882,35 @@ test('profiler.wasteReport detects a real hit-iteration-cap scenario end to end'
   const finding = toolFindings(report.findings).find((f) => f.toolName === 'search_docs');
   assert.ok(finding, 'the tool call with no follow-up model call must be flagged');
   assert.equal(finding.occurrences, 1);
+  profiler.close();
+});
+
+test('profiler.wasteReport detects a real transient-failure-then-retry scenario end to end', async () => {
+  // The permanent regression counterpart to a live-network verification run
+  // against a real Ollama server: a call errors, the SAME model is retried
+  // under the SAME step, and the retry succeeds — exactly the shape a real
+  // transient network failure produces.
+  const profiler = createProfiler({ dbPath: ':memory:' });
+  const run = profiler.startRun('agent');
+  const step = run.startStep('ask');
+
+  const failed = step.startLlmCall('qwen2.5:7b', { model: 'qwen2.5:7b', provider: 'ollama', cacheSupported: false });
+  failed.end({ error: new Error('fetch failed'), tokens: tokens({}) });
+
+  // A real network retry always takes non-zero time; without a delay here
+  // two synchronous Date.now() calls can land in the same millisecond,
+  // which the detector correctly refuses to treat as "later than."
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const retried = step.startLlmCall('qwen2.5:7b', { model: 'qwen2.5:7b', provider: 'ollama', cacheSupported: false });
+  retried.end({ tokens: tokens({ input: 20, output: 8 }) });
+
+  step.end();
+  run.end();
+
+  const report = profiler.wasteReport(run.rootId);
+  const finding = retryFindings(report.findings).find((f) => f.name === 'qwen2.5:7b');
+  assert.ok(finding, 'the failed attempt superseded by a real retry must be flagged');
+  assert.equal(finding.wastedAttempts, 1);
   profiler.close();
 });

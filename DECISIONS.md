@@ -130,11 +130,29 @@ Entries are grouped by area, not by date. Each one names the decision, the alter
 
 **Verified against real data, not just constructed fixtures.** It fired on the very first live run after being built — one of three real Ollama sessions in the example script flagged `get_related_topics` as orphaned. The small local model called the tool; the session ended before any later model call could use the result. Not staged, not a synthetic test tree — the first real run this ran against.
 
+### Pattern #3 ("retries and their cost") is also a structural check, keyed on `status: 'error'`
+
+**Decision:** a retry is an `llm_call` or `tool_call` that ended with `status: 'error'`, followed by a later call of the SAME type and name under the SAME parent, started after the failed one ended. The failed call's full cost (its own tokens plus any nested `llm_call` cost — a tool that calls a model before failing) counts as avoidable, unlike patterns #1/#2 where only part of the cost is waste: nothing about a failed attempt was usable, so none of its cost is legitimate spend.
+
+**Why this definition and not "any two same-name calls under one parent":** without stored content, two calls to the same tool or model can be entirely legitimate — `search` called twice with two different queries is normal multi-step tool use, not a retry, and there is no way to tell the difference from sizes/tokens/timing alone. `status: 'error'` is the one signal that is not a guess: the caller reported it explicitly. A failed call with no later same-name successor is not flagged either — the caller simply gave up, and nothing was duplicated, so there is nothing to charge as "wasted redo."
+
+**Why a still-`running` run needs no special case, unlike pattern #2:** pattern #2 had to explicitly skip an in-flight run, because its trailing tool call genuinely hasn't had its "chance" yet. Here, the finding only fires once a successor call actually EXISTS in the tree — a run that hasn't retried yet simply produces no successor to find, so the same "nothing to compare against" logic that makes pattern #1 safe on a first call makes this safe on an in-flight run too, with no extra status check needed.
+
+**Verified against a real transient failure and retry, not just constructed fixtures.** Pointed a wrapped Ollama client at an unreachable port for one call (a genuine connection failure, not a mock), then retried the same model against the real local server and got a real response — `detectRetries` flagged the failed attempt correctly. Turned into a permanent regression test afterward (`test/waste-detection.test.ts`).
+
 ### Hypothetical pricing (`priceAs`) is never allowed to look like real spend
 
 **Decision:** `costBreakdown`/`detectWaste` accept an optional `priceAs: <model id>` that re-prices a run's *real* recorded token counts under a different model's rate — for a free/local run with no real price, or for "what would this have cost on Sonnet instead of Opus." The result is always double-labeled: a dedicated `⚠⚠ HYPOTHETICAL COST` banner line, *and* an inline `(HYPOTHETICAL, priced as X)` tag on the total itself, so scrolling past one still leaves the other visible.
 
 **Why:** a run on a provider with no real price reports every dollar figure as `$0.000000` — technically correct and functionally inert; percentages alone don't land the way a dollar figure does. But a hypothetical number that could be mistaken for a real one is worse than no number at all, given this tool's whole purpose is helping someone reason accurately about spend. Aggregating runs priced under *different* bases (some actual, some hypothetical, or hypothetical under different models) is flagged `pricingMode: 'mixed'` and prints a loud warning instead of silently summing incompatible dollar figures — the same discipline applied one level up.
+
+### Version Diff groups "before"/"after" by caller-supplied selector, not a first-class `version` field
+
+**Decision:** `Profiler.versionDiff({ before, after })` takes two `{name, limit}` selectors — the exact shape `costBreakdownRecent` already accepts — not a new `version` column, migration, or `StartOptions.version`/`ListRunsOptions.version` filter.
+
+**Why:** PROJECT_CONTEXT.md's own data-model section only ever described "prompt version" as an example value INSIDE `metadata` (free-form, caller-owned), never as a field fyren itself understands or indexes — `metadata` is stored as an unindexed JSON blob (see `storage.ts`), so querying it efficiently would need real schema work. A first-class field is a real, walkable-back-from-never-again commitment once callers start writing to it; a caller-supplied selector costs nothing to add later if it turns out to be needed, and today's obvious workaround — give each version its own run `name` — already works with zero new code. Consistent with this project's standing bias against building a capability before a concrete need has actually shown up.
+
+**Why "behavior changed" means tool-call frequency, and only that, in v1:** the same "never store raw content" constraint that forced Waste Detection patterns #2/#3 into structural definitions applies here — fyren cannot compare what two prompt versions *said*, only what they *did*, measurably. Of the structural candidates (tool-call frequency by name, llm_call/round-trip count per run, error rate, run duration), tool-call frequency by name was chosen as the sole v1 signal: it most directly answers the question a prompt edit is usually trying to answer ("did the model reach for this tool more, less, or differently now"), and — like every candidate — needs no new instrumentation, since `tool_call` nodes already carry everything required. The other three are real, cheap v2 additions, deliberately left out to keep the first cut small rather than guessing at which ones earn their place.
 
 ---
 

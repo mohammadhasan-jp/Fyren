@@ -66,6 +66,26 @@
  * summarizes its own output — see examples/doc-qa-agent.ts's search tool
  * pattern). A pure-function tool with no nested LLM cost still gets flagged,
  * just at $0: the finding is about wasted WORK, not only wasted dollars.
+ *
+ * ── Pattern #3: retried calls ──────────────────────────────────────────
+ *
+ * The same content-blindness that redefined pattern #2 applies here: fyren
+ * cannot tell whether two same-named calls carried the same request, so "the
+ * caller asked twice" is not by itself a signal — calling tool `search` twice
+ * with two different queries is normal multi-step tool use, not a retry.
+ * The one signal that IS reliable without content: an explicit `status:
+ * 'error'`, reported by the caller, not inferred. A retry is therefore
+ * defined as: an `llm_call` or `tool_call` that ended in `error`, followed by
+ * another call of the SAME type and name under the SAME parent, started
+ * after it ended. That later call's mere existence — succeeded or not —
+ * proves the failed attempt's cost was thrown away and redone; a failed
+ * attempt with no successor (the caller just gave up) is not retried, so it
+ * is not flagged — there was nothing to duplicate.
+ *
+ * Unlike patterns #1/#2, the wasted cost here is the FULL cost of every
+ * flagged failed attempt (its own tokens, plus any nested llm_call cost — a
+ * tool that calls a model before failing) — nothing about a failed attempt
+ * produced a usable result, so none of its cost is legitimate spend.
  */
 
 import { rateFor, effectiveRate, estimateCost, type ModelRate } from '../pricing.ts';
@@ -110,8 +130,18 @@ export interface OrphanedToolCallFinding {
   avoidableCostUsd: number;
 }
 
+export interface RetriedCallFinding {
+  type: 'retried_call';
+  nodeType: 'llm_call' | 'tool_call';
+  name: string;
+  /** Failed attempts that were superseded by a later same-name attempt under the same parent — the ones whose cost was wasted. */
+  wastedAttempts: number;
+  /** Full cost of the wasted attempt(s): their own tokens plus any nested llm_call cost. */
+  avoidableCostUsd: number;
+}
+
 /** A discriminated union, one member per Waste Detection pattern — see the file header. */
-export type WasteFinding = StaticContentWasteFinding | OrphanedToolCallFinding;
+export type WasteFinding = StaticContentWasteFinding | OrphanedToolCallFinding | RetriedCallFinding;
 
 export interface RunWasteReport {
   runId: string;
@@ -145,8 +175,9 @@ export function detectWaste(tree: readonly RunNode[], options: CostBreakdownOpti
   ).filter((finding): finding is StaticContentWasteFinding => finding !== null);
 
   const orphanedToolFindings = detectOrphanedToolCalls(tree, root, options.priceAs);
+  const retryFindings = detectRetries(tree, options.priceAs);
 
-  const findings: WasteFinding[] = [...staticContentFindings, ...orphanedToolFindings];
+  const findings: WasteFinding[] = [...staticContentFindings, ...orphanedToolFindings, ...retryFindings];
 
   return {
     runId: root?.rootId ?? '',
@@ -264,13 +295,7 @@ function detectOrphanedToolCalls(
     .filter((node) => node.type === 'llm_call')
     .map((node) => node.startedAt);
 
-  const childrenByParent = new Map<string, RunNode[]>();
-  for (const node of tree) {
-    if (!node.parentId) continue;
-    const list = childrenByParent.get(node.parentId) ?? [];
-    list.push(node);
-    childrenByParent.set(node.parentId, list);
-  }
+  const childrenByParent = buildChildrenByParent(tree);
 
   const byToolName = new Map<string, { occurrences: number; avoidableCostUsd: number }>();
 
@@ -291,6 +316,66 @@ function detectOrphanedToolCalls(
     toolName,
     ...entry,
   }));
+}
+
+function buildChildrenByParent(tree: readonly RunNode[]): Map<string, RunNode[]> {
+  const childrenByParent = new Map<string, RunNode[]>();
+  for (const node of tree) {
+    if (!node.parentId) continue;
+    const list = childrenByParent.get(node.parentId) ?? [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  }
+  return childrenByParent;
+}
+
+/**
+ * An llm_call or tool_call that ended in error, superseded by a later call of
+ * the same type and name under the same parent — see the file header for why
+ * this is the only definition of "retry" a content-blind tree can defend.
+ */
+function detectRetries(tree: readonly RunNode[], priceAsModel: string | undefined): RetriedCallFinding[] {
+  const failed = tree.filter(
+    (node) => (node.type === 'llm_call' || node.type === 'tool_call') && node.status === 'error',
+  );
+  if (failed.length === 0) return [];
+
+  const childrenByParent = buildChildrenByParent(tree);
+  const byKey = new Map<
+    string,
+    { nodeType: 'llm_call' | 'tool_call'; name: string; wastedAttempts: number; avoidableCostUsd: number }
+  >();
+
+  for (const call of failed) {
+    if (!call.parentId) continue;
+
+    const siblings = childrenByParent.get(call.parentId) ?? [];
+    const endedAt = call.endedAt ?? call.startedAt;
+    const hasSuccessor = siblings.some(
+      (sibling) =>
+        sibling.id !== call.id &&
+        sibling.type === call.type &&
+        sibling.name === call.name &&
+        sibling.startedAt > endedAt,
+    );
+    if (!hasSuccessor) continue; // failed and never retried — nothing was duplicated
+
+    const ownCost = estimateCost(priceAsModel ?? call.model, call.tokens);
+    const nestedCost = sumDescendantLlmCost(childrenByParent, call.id, priceAsModel);
+
+    const key = `${call.type}:${call.name}`;
+    const entry = byKey.get(key) ?? {
+      nodeType: call.type as 'llm_call' | 'tool_call',
+      name: call.name,
+      wastedAttempts: 0,
+      avoidableCostUsd: 0,
+    };
+    entry.wastedAttempts += 1;
+    entry.avoidableCostUsd += ownCost + nestedCost;
+    byKey.set(key, entry);
+  }
+
+  return [...byKey.values()].map((entry) => ({ type: 'retried_call' as const, ...entry }));
 }
 
 /** Sum the cost of every llm_call anywhere under `nodeId` — a tool can nest its own model calls. */
@@ -335,6 +420,16 @@ export type AggregateWasteFinding =
       affectedRunCount: number;
       totalOccurrences: number;
       totalAvoidableCostUsd: number;
+    }
+  | {
+      type: 'retried_call';
+      nodeType: 'llm_call' | 'tool_call';
+      name: string;
+      label: string;
+      /** How many of the analysed runs had this finding at all. */
+      affectedRunCount: number;
+      totalWastedAttempts: number;
+      totalAvoidableCostUsd: number;
     };
 
 export interface AggregateWasteReport {
@@ -362,10 +457,18 @@ interface OrphanedToolAccumulator {
   totalOccurrences: number;
   totalAvoidableCostUsd: number;
 }
+interface RetriedCallAccumulator {
+  kind: 'retried_call';
+  nodeType: 'llm_call' | 'tool_call';
+  name: string;
+  affectedRunCount: number;
+  totalWastedAttempts: number;
+  totalAvoidableCostUsd: number;
+}
 
 /** Roll several run waste reports into one, ranked by dollar impact. */
 export function aggregateWaste(reports: readonly RunWasteReport[]): AggregateWasteReport {
-  const byKey = new Map<string, StaticContentAccumulator | OrphanedToolAccumulator>();
+  const byKey = new Map<string, StaticContentAccumulator | OrphanedToolAccumulator | RetriedCallAccumulator>();
 
   let sawCacheSupported = false;
   let sawCacheUnsupported = false;
@@ -399,7 +502,7 @@ export function aggregateWaste(reports: readonly RunWasteReport[]): AggregateWas
         entry.totalWastedTokens += finding.wastedTokens;
         entry.totalAvoidableCostUsd += finding.avoidableCostUsd;
         byKey.set(key, entry);
-      } else {
+      } else if (finding.type === 'orphaned_tool_call') {
         const key = `tool:${finding.toolName}`;
         const entry = (byKey.get(key) as OrphanedToolAccumulator | undefined) ?? {
           kind: 'orphaned_tool_call',
@@ -410,6 +513,20 @@ export function aggregateWaste(reports: readonly RunWasteReport[]): AggregateWas
         };
         entry.affectedRunCount += 1;
         entry.totalOccurrences += finding.occurrences;
+        entry.totalAvoidableCostUsd += finding.avoidableCostUsd;
+        byKey.set(key, entry);
+      } else {
+        const key = `retry:${finding.nodeType}:${finding.name}`;
+        const entry = (byKey.get(key) as RetriedCallAccumulator | undefined) ?? {
+          kind: 'retried_call',
+          nodeType: finding.nodeType,
+          name: finding.name,
+          affectedRunCount: 0,
+          totalWastedAttempts: 0,
+          totalAvoidableCostUsd: 0,
+        };
+        entry.affectedRunCount += 1;
+        entry.totalWastedAttempts += finding.wastedAttempts;
         entry.totalAvoidableCostUsd += finding.avoidableCostUsd;
         byKey.set(key, entry);
       }
@@ -424,25 +541,37 @@ export function aggregateWaste(reports: readonly RunWasteReport[]): AggregateWas
   );
 
   const findings: AggregateWasteFinding[] = [...byKey.values()]
-    .map((entry): AggregateWasteFinding =>
-      entry.kind === 'uncached_static_content'
-        ? {
-            type: 'uncached_static_content',
-            segment: entry.segment,
-            label: SEGMENT_LABELS[entry.segment],
-            affectedRunCount: entry.affectedRunCount,
-            totalWastedTokens: entry.totalWastedTokens,
-            totalAvoidableCostUsd: entry.totalAvoidableCostUsd,
-          }
-        : {
-            type: 'orphaned_tool_call',
-            toolName: entry.toolName,
-            label: entry.toolName,
-            affectedRunCount: entry.affectedRunCount,
-            totalOccurrences: entry.totalOccurrences,
-            totalAvoidableCostUsd: entry.totalAvoidableCostUsd,
-          },
-    )
+    .map((entry): AggregateWasteFinding => {
+      if (entry.kind === 'uncached_static_content') {
+        return {
+          type: 'uncached_static_content',
+          segment: entry.segment,
+          label: SEGMENT_LABELS[entry.segment],
+          affectedRunCount: entry.affectedRunCount,
+          totalWastedTokens: entry.totalWastedTokens,
+          totalAvoidableCostUsd: entry.totalAvoidableCostUsd,
+        };
+      }
+      if (entry.kind === 'orphaned_tool_call') {
+        return {
+          type: 'orphaned_tool_call',
+          toolName: entry.toolName,
+          label: entry.toolName,
+          affectedRunCount: entry.affectedRunCount,
+          totalOccurrences: entry.totalOccurrences,
+          totalAvoidableCostUsd: entry.totalAvoidableCostUsd,
+        };
+      }
+      return {
+        type: 'retried_call',
+        nodeType: entry.nodeType,
+        name: entry.name,
+        label: entry.name,
+        affectedRunCount: entry.affectedRunCount,
+        totalWastedAttempts: entry.totalWastedAttempts,
+        totalAvoidableCostUsd: entry.totalAvoidableCostUsd,
+      };
+    })
     .sort((a, b) => b.totalAvoidableCostUsd - a.totalAvoidableCostUsd);
 
   return {
@@ -489,12 +618,21 @@ export function formatWasteReport(report: RunWasteReport): string {
           `${int(finding.wastedTokens)} avoidable tokens, ${usd(finding.avoidableCostUsd)}` +
           `${hypothetical ? ' (hypothetical)' : ''}.`,
       );
-    } else {
+    } else if (finding.type === 'orphaned_tool_call') {
       lines.push(
         `  ⚠ orphaned tool call — "${finding.toolName}" ran ${finding.occurrences} time(s) but its result ` +
           `never reached another model call before the run ended (hit an iteration cap, or an early exit).` +
           (finding.avoidableCostUsd > 0
             ? ` ${usd(finding.avoidableCostUsd)} of that was the tool's own LLM cost${hypothetical ? ' (hypothetical)' : ''}, spent for nothing.`
+            : ''),
+      );
+    } else {
+      const kind = finding.nodeType === 'llm_call' ? 'model call' : 'tool call';
+      lines.push(
+        `  ⚠ retried ${kind} — "${finding.name}" failed ${finding.wastedAttempts} time(s) and was superseded ` +
+          `by a later attempt under the same step (status: error, followed by another same-name call).` +
+          (finding.avoidableCostUsd > 0
+            ? ` ${usd(finding.avoidableCostUsd)} spent on the failed attempt(s)${hypothetical ? ' (hypothetical)' : ''}.`
             : ''),
       );
     }
@@ -538,11 +676,17 @@ export function formatAggregateWasteReport(agg: AggregateWasteReport): string {
         `  ⚠ "${finding.label}" uncached in ${finding.affectedRunCount} of ${agg.runCount} run(s) — ` +
           `${int(finding.totalWastedTokens)} avoidable tokens, ${usd(finding.totalAvoidableCostUsd)} total.`,
       );
-    } else {
+    } else if (finding.type === 'orphaned_tool_call') {
       lines.push(
         `  ⚠ "${finding.toolName}" orphaned in ${finding.affectedRunCount} of ${agg.runCount} run(s), ` +
           `${finding.totalOccurrences} occurrence(s) total` +
           (finding.totalAvoidableCostUsd > 0 ? ` — ${usd(finding.totalAvoidableCostUsd)} of wasted LLM cost.` : '.'),
+      );
+    } else {
+      lines.push(
+        `  ⚠ "${finding.name}" retried in ${finding.affectedRunCount} of ${agg.runCount} run(s), ` +
+          `${finding.totalWastedAttempts} failed attempt(s) total` +
+          (finding.totalAvoidableCostUsd > 0 ? ` — ${usd(finding.totalAvoidableCostUsd)} spent on failed attempts.` : '.'),
       );
     }
   }

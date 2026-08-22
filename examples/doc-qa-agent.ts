@@ -191,6 +191,8 @@ export interface DocsQaOptions {
   /** Measure input composition precisely instead of estimating from characters. */
   precise?: boolean;
   runName?: string;
+  /** Override `SYSTEM_PROMPT` — for comparing two prompt versions (Version Diff). Default: `SYSTEM_PROMPT`. */
+  systemPrompt?: string;
   /** Recorded on every node. Default `'anthropic'` — see `WrapOptions.provider`. */
   provider?: string;
   /**
@@ -218,6 +220,7 @@ export async function runDocsQaSession(
 ): Promise<string> {
   const model = options.model ?? DEFAULT_MODEL;
   const maxTokens = options.maxTokens ?? 400;
+  const systemPrompt = options.systemPrompt ?? SYSTEM_PROMPT;
   const wrapOptions = {
     precise: options.precise ?? false,
     name: model,
@@ -237,7 +240,7 @@ export async function runDocsQaSession(
           const params: AnthropicCreateParams = {
             model,
             max_tokens: maxTokens,
-            system: SYSTEM_PROMPT,
+            system: systemPrompt,
             tools: TOOLS,
             messages: conversation,
           };

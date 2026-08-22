@@ -36,7 +36,7 @@ npm install
 
 npm run example        # records a fake agent run and reads it back — no network, no cost
 npm run example:cost   # the cost breakdown, on that same mock run
-npm run check          # typecheck + 172 tests
+npm run check          # typecheck + 181 tests
 
 npm run example:ollama                              # the real thing — free, local, no key needed
 ANTHROPIC_API_KEY=sk-ant-... npm run example:real    # the real thing — hosted, a few cents
@@ -56,9 +56,9 @@ Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
 |---|---|
 | 1 — data collection | done |
 | 2 — analysis #1, cost breakdown (+ hypothetical pricing) | done |
-| 3 — analysis #2, waste detection — patterns #1/3, #2/3 | done |
+| 3 — analysis #2, waste detection — all 3 patterns | done |
 | Providers: Anthropic, OpenAI, Gemini, Ollama | done |
-| Waste detection pattern #3 (retries), analysis #3 (version diff) | not started |
+| Analysis #3 (version diff) | done |
 | CLI (`bin/fyren.ts`) | done |
 | Web UI (`fyren --ui`) | done |
 
@@ -77,6 +77,7 @@ Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
 | Pricing table / cost estimate (per-model cache multipliers) | `src/pricing.ts` |
 | **Cost breakdown** (+ `priceAs` hypothetical pricing) | `src/analysis/cost-breakdown.ts` |
 | **Waste detection** | `src/analysis/waste-detection.ts` |
+| **Version diff** | `src/analysis/version-diff.ts` |
 | Real doc Q&A agent (provider-agnostic) | `examples/doc-qa-agent.ts` |
 | Driver — real Anthropic API | `examples/run-real-agent.ts` |
 | Driver — real local Ollama | `examples/run-ollama-agent.ts` |
@@ -94,7 +95,7 @@ Two floors, and the higher one wins:
 - `node:sqlite` is unflagged from **22.13**
 - native TypeScript execution (type stripping) is unflagged from **22.18**
 
-Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 172.
+Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 181.
 
 **About the SQLite experimental warning.** `node:sqlite` is Stability 1.1 ("active development") on Node 22 and 1.2 ("release candidate") on Node 24.15+. On Node 22 it prints, once:
 
@@ -287,11 +288,11 @@ Every output labels which one produced the numbers — `measured via count_token
 
 ## Analysis #2 — waste detection
 
-Per PROJECT_CONTEXT.md §4c, three patterns are planned. Two exist so far:
+Per PROJECT_CONTEXT.md §4c, three patterns are planned. All three are done:
 
 1. **Uncached static content** — done (below)
 2. **Tool output that was never used** — done (below)
-3. Retries and their cost — not started
+3. **Retries and their cost** — done (below)
 
 ### Pattern #1 — uncached static content
 
@@ -335,6 +336,25 @@ The small local model called `get_related_topics`, and that session ended before
 **Cost is not the parent call's tokens** — deciding to call the tool was legitimate work. It's any LLM cost the tool *itself* incurred: a nested `llm_call` under the `tool_call`, for a tool that summarizes its own output (see the search tool in `examples/doc-qa-agent.ts`). A pure-function tool with no nested cost is still flagged — the finding is about wasted *work*, not only wasted dollars — just at `$0`.
 
 The check runs across the **whole run**, not just the tool call's immediate step: an agent might legitimately end a step right after a tool call and use the result in the next one. Only "nothing, anywhere in the rest of the run, ever called the model again" is unambiguous enough to flag.
+
+### Pattern #3 — retried calls
+
+Same content-blindness as pattern #2, so the same fix: fyren can't tell whether two same-named calls carried the same request, so "the caller asked twice" isn't a signal by itself — calling `search` twice with two different queries is normal multi-step tool use, not a retry. The one signal that *is* reliable without content: an explicit `status: 'error'`, reported by the caller. A retry is an `llm_call` or `tool_call` that ended in error, followed by a later call of the SAME type and name under the SAME parent — the later call's mere existence proves the failed one's cost was thrown away and redone.
+
+```ts
+profiler.wasteReport(runId);
+```
+
+Verified against a real transient failure: pointed a wrapped Ollama client at an unreachable port for one call (a genuine connection error), then retried the same model against the real local server and got a real response:
+
+```
+run "retry-verification"  2 llm calls  f49385f9-…
+  ⚠ retried model call — "qwen2.5:7b" failed 1 time(s) and was superseded by a later attempt under the same step (status: error, followed by another same-name call).
+  note: this provider has no caching concept at all — these figures show the POTENTIAL savings on a caching-capable provider, not a fixable bug in your code as written.
+  total avoidable: $0.000000
+```
+
+`$0.000000` here because Ollama is free and nothing was billed before the connection failed — on a hosted provider, or a failure after partial output, `avoidableCostUsd` would be nonzero. Unlike patterns #1/#2, the wasted cost is the **full** cost of every flagged failed attempt (its own tokens, plus any nested `llm_call` cost) — nothing about a failed attempt produced anything usable, so none of its cost is legitimate spend. A failed call with no later same-name successor is never flagged: the caller just gave up, and nothing was duplicated.
 
 ### Two units, on purpose: characters decide, tokens get reported
 
@@ -435,7 +455,7 @@ I do not have a funded `ANTHROPIC_API_KEY` in this environment — the one real 
 
 ## Tests
 
-`npm test` — 172 tests, no network, no API key, run with Node's built-in runner.
+`npm test` — 181 tests, no network, no API key, run with Node's built-in runner.
 
 | File | Covers |
 |---|---|

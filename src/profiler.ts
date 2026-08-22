@@ -29,6 +29,7 @@ import {
   type RunWasteReport,
   type AggregateWasteReport,
 } from './analysis/waste-detection.ts';
+import { diffVersions, type VersionDiffResult } from './analysis/version-diff.ts';
 import {
   emptyTokens,
   type InputComposition,
@@ -323,6 +324,33 @@ export class Profiler {
   /** "Across the last N runs, how much am I overpaying for content that should have been cached." */
   aggregateWasteReport(options: CostBreakdownRecentOptions | number = {}): AggregateWasteReport {
     return aggregateWaste(this.wasteReportRecent(options));
+  }
+
+  /**
+   * Analysis #3 — how did token usage and tool-call behavior change between
+   * two sets of runs? `before`/`after` are independent selectors, each the
+   * same `{name, limit, priceAs}` shape `costBreakdownRecent` takes — there is
+   * no first-class "version" field; give each version its own run `name` (or
+   * point `--db` at two different files). See DECISIONS.md.
+   */
+  versionDiff(selectors: {
+    before: CostBreakdownRecentOptions | number;
+    after: CostBreakdownRecentOptions | number;
+  }): VersionDiffResult {
+    const beforeRuns = this.listRuns(selectors.before);
+    const afterRuns = this.listRuns(selectors.after);
+    const beforeTrees = this.getTrees(beforeRuns.map((run) => run.id));
+    const afterTrees = this.getTrees(afterRuns.map((run) => run.id));
+    const beforeOptions: CostBreakdownOptions =
+      typeof selectors.before === 'number' ? {} : { priceAs: selectors.before.priceAs };
+    const afterOptions: CostBreakdownOptions =
+      typeof selectors.after === 'number' ? {} : { priceAs: selectors.after.priceAs };
+
+    return diffVersions(
+      beforeRuns.map((run) => beforeTrees.get(run.id) ?? []),
+      afterRuns.map((run) => afterTrees.get(run.id) ?? []),
+      { before: beforeOptions, after: afterOptions },
+    );
   }
 
   close(): void {
