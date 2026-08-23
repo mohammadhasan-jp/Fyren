@@ -36,7 +36,7 @@ npm install
 
 npm run example        # records a fake agent run and reads it back — no network, no cost
 npm run example:cost   # the cost breakdown, on that same mock run
-npm run check          # typecheck + 181 tests
+npm run check          # typecheck + 192 tests
 
 npm run example:ollama                              # the real thing — free, local, no key needed
 ANTHROPIC_API_KEY=sk-ant-... npm run example:real    # the real thing — hosted, a few cents
@@ -95,7 +95,7 @@ Two floors, and the higher one wins:
 - `node:sqlite` is unflagged from **22.13**
 - native TypeScript execution (type stripping) is unflagged from **22.18**
 
-Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 181.
+Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 192.
 
 **About the SQLite experimental warning.** `node:sqlite` is Stability 1.1 ("active development") on Node 22 and 1.2 ("release candidate") on Node 24.15+. On Node 22 it prints, once:
 
@@ -451,11 +451,13 @@ npm run example:real
 
 `FYREN_PRECISE=0` skips `count_tokens` measurement and uses the character estimate only.
 
-I do not have a funded `ANTHROPIC_API_KEY` in this environment — the one real attempt returned an *insufficient credit* error, which the script now turns into a clear message rather than a crash (that failure is exactly what surfaced the shutdown bug above, and is now a regression test). I have **not** and will not try to obtain Anthropic credentials on my own — creating an account or entering payment details anywhere, even to unblock a demo, is outside what I'll do without you doing it yourself. This script is built, typechecked against the real SDK's types, and its tool-calling loop was dry-run against a mock that emits real `tool_use`/`tool_result`-shaped turns (tree shape, precise mode, aggregation — all clean) — but I have not personally seen its report on genuine Claude output. Run it with your own key and it's yours to compare against the Ollama report above.
+**Known gap, documented on purpose, not a blocker: this exact script has not yet been run against a funded `ANTHROPIC_API_KEY`.** The one real attempt returned an *insufficient credit* error, which the script now turns into a clear message rather than a crash (that failure is exactly what surfaced the shutdown bug documented above, and is now a regression test). This is narrower than it might sound: the same prefix-fill cache-attribution algorithm has *already* been verified against a real, live cache hit — see [Verified against a real cache hit](#verified-against-a-real-cache-hit) above — just on Gemini, not Anthropic yet. What's specifically untested is Anthropic's own usage shape, where cached tokens are reported as *additive* fields rather than a *subset* of the prompt count (see the [Providers](#providers) table) — the one piece of arithmetic per provider that genuinely differs and can't be exercised except against that provider's real API.
+
+fyren works fully with Anthropic today in every other respect — real instrumentation, real cost math, same test coverage as every other provider. Closing this is the single highest-priority item the moment a funded key exists (see [AGENT.md](./AGENT.md)), and it does not block using fyren on Anthropic traffic now. I do not create accounts or enter payment details to obtain a key myself, even on request — that's a firm boundary, not a resource problem. Run `npm run example:real` with your own key whenever you have one; it costs a few cents and closes this out immediately.
 
 ## Tests
 
-`npm test` — 181 tests, no network, no API key, run with Node's built-in runner.
+`npm test` — 192 tests, no network, no API key, run with Node's built-in runner.
 
 | File | Covers |
 |---|---|
@@ -471,7 +473,7 @@ I do not have a funded `ANTHROPIC_API_KEY` in this environment — the one real 
 
 ## Next
 
-Waste Detection patterns #1 and #2 are done, both verified against real data. Remaining: pattern #3 (retries and their cost), analysis #3 (Version Diff), and the CLI + local web UI — full scope and acceptance criteria in [PRD.md](./PRD.md), not repeated here.
+Everything in the original v1 scope is built: all three Waste Detection patterns, Version Diff, both providers-of-provenance, the CLI, and the Web UI — see the [Status](#status) table above. What's left is verification depth, not missing features: Anthropic's cache-attribution math against a real Anthropic cache hit (see [`npm run example:real`](#npm-run-examplereal--hosted-claude-haiku-45-a-few-cents) above) is the one open item, and OpenAI is likewise mock-only so far. Full scope and acceptance criteria in [PRD.md](./PRD.md), not repeated here.
 
 ## More docs
 
