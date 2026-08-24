@@ -1,0 +1,49 @@
+name: Publish to npm
+
+# Publishing is deliberately not automatic on push to master. It fires when a
+# GitHub Release is published, or when a human runs it from the Actions tab —
+# releasing should be a decision, not a side effect of merging.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      # The whole point: this lets the job mint a short-lived OIDC token that
+      # npm trusts, so no long-lived NPM_TOKEN is ever stored in this repo.
+      # Trusted publishing must also be configured on npmjs.com for the
+      # package, naming this repository AND this workflow filename.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1; the npm bundled with a given
+      # Node release is often older, so pin it explicitly rather than hoping.
+      - name: Use an npm new enough for trusted publishing
+        run: npm install -g npm@latest
+
+      - run: npm ci
+
+      # Never publish something that does not pass its own tests. This costs a
+      # minute and prevents the one class of mistake that cannot be undone:
+      # a broken version is permanent on npm, `npm unpublish` is restricted,
+      # and the only fix is shipping another version on top of it.
+      - name: Typecheck and test
+        run: npm run check
+
+      # `prepack` runs the build, which self-verifies the artifact (shebang
+      # intact, assets copied, no .ts specifiers left in dist/).
+      - name: Publish
+        run: npm publish --provenance
