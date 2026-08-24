@@ -914,3 +914,117 @@ test('profiler.wasteReport detects a real transient-failure-then-retry scenario 
   assert.equal(finding.wastedAttempts, 1);
   profiler.close();
 });
+
+/* ------------------------------------------------------------------------ *
+ * Orphaned-tool-call detection at millisecond resolution.
+ *
+ * This shipped wrong. The "did a model call run after this tool?" check used
+ * a strict `>` against whole-millisecond timestamps, so a model call that
+ * genuinely ran after a fast tool — starting in the SAME millisecond the tool
+ * ended — was reported as an orphaned tool call. Caught on real recorded data
+ * from the mock agent: a `search` tool ended at ...793 and the next llm_call
+ * started at ...793, and fyren told the user they had wasted work on a tool
+ * whose result demonstrably reached the model.
+ *
+ * Any sub-millisecond tool can hit this: an in-process lookup, a cache hit, a
+ * stub in a test.
+ * ------------------------------------------------------------------------ */
+
+/** A finished run tree with timestamps pinned exactly, so ms-resolution edges are testable. */
+function treeWithTimings(options: {
+  toolEndedAt: number;
+  nextLlmStartedAt: number | null;
+}): RunNode[] {
+  const base = 1_787_599_469_700;
+  const node = (over: Partial<RunNode> & Pick<RunNode, 'id' | 'type' | 'name'>): RunNode => ({
+    parentId: 'run-1',
+    rootId: 'run-1',
+    status: 'ok',
+    startedAt: base,
+    endedAt: base,
+    durationMs: 0,
+    tokens: { input: 0, output: 0, thinking: 0, cacheRead: 0, cacheWrite: 0 },
+    costUsd: 0,
+    provider: null,
+    model: null,
+    cacheSupported: true,
+    error: null,
+    metadata: {},
+    inputComposition: null,
+    ...over,
+  });
+
+  const nodes: RunNode[] = [
+    node({ id: 'run-1', type: 'run', name: 'ms-edge', parentId: null, endedAt: base + 500 }),
+    node({
+      id: 'tool-1',
+      type: 'tool_call',
+      name: 'search',
+      startedAt: base,
+      endedAt: options.toolEndedAt,
+    }),
+  ];
+
+  if (options.nextLlmStartedAt !== null) {
+    nodes.push(
+      node({
+        id: 'llm-after',
+        type: 'llm_call',
+        name: 'claude-opus-5',
+        model: 'claude-opus-5',
+        startedAt: options.nextLlmStartedAt,
+        endedAt: options.nextLlmStartedAt + 10,
+      }),
+    );
+  }
+
+  return nodes;
+}
+
+const orphanNames = (tree: RunNode[]): string[] =>
+  detectWaste(tree)
+    .findings.filter((finding) => finding.type === 'orphaned_tool_call')
+    .map((finding) => (finding as { toolName: string }).toolName);
+
+test('a model call starting in the SAME millisecond a tool ended does not make the tool orphaned', () => {
+  const tree = treeWithTimings({ toolEndedAt: 1_787_599_469_793, nextLlmStartedAt: 1_787_599_469_793 });
+
+  assert.deepEqual(orphanNames(tree), [], 'the model call ran after the tool — this is not waste');
+});
+
+test('a model call starting strictly later still counts, obviously', () => {
+  const tree = treeWithTimings({ toolEndedAt: 1_787_599_469_793, nextLlmStartedAt: 1_787_599_469_850 });
+
+  assert.deepEqual(orphanNames(tree), []);
+});
+
+test('a tool with genuinely no model call after it is still flagged — the fix must not blind the check', () => {
+  const tree = treeWithTimings({ toolEndedAt: 1_787_599_469_793, nextLlmStartedAt: null });
+
+  assert.deepEqual(orphanNames(tree), ['search']);
+});
+
+test('a model call that ran BEFORE the tool ended does not un-orphan it', () => {
+  const tree = treeWithTimings({ toolEndedAt: 1_787_599_469_793, nextLlmStartedAt: 1_787_599_469_700 });
+
+  assert.deepEqual(orphanNames(tree), ['search'], 'an earlier call never saw this tool result');
+});
+
+test("a tool's own nested model call cannot un-orphan it, even at the same millisecond", () => {
+  const tree = treeWithTimings({ toolEndedAt: 1_787_599_469_793, nextLlmStartedAt: null });
+  // A tool that summarises its own output — the nested call is part of the
+  // tool's work, not evidence the result reached the agent's model.
+  const nested = { ...tree[1]! };
+  tree.push({
+    ...nested,
+    id: 'llm-nested',
+    type: 'llm_call',
+    name: 'claude-haiku-4-5',
+    model: 'claude-haiku-4-5',
+    parentId: 'tool-1',
+    startedAt: 1_787_599_469_793,
+    endedAt: 1_787_599_469_800,
+  });
+
+  assert.deepEqual(orphanNames(tree), ['search']);
+});

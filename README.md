@@ -723,6 +723,14 @@ What is left is **verification depth, not missing features**. One item, and it i
 
 ## Releases
 
+### 0.1.2
+
+**Bug fix — orphaned-tool-call detection over-reported waste.** The check for "did a model call run after this tool?" compared whole-millisecond timestamps with a strict `>`, so a model call that genuinely ran after a fast tool — starting in the *same* millisecond it ended — was reported as an orphaned tool call. fyren was telling you a tool's result had been thrown away when it demonstrably reached the model.
+
+Found on real recorded data, including a live local-model run where the next call started 0 ms after the tool ended. Any sub-millisecond tool could trigger it: an in-process lookup, a cache hit, a stubbed tool in a test.
+
+Loosening the comparison to `>=` alone would have swapped the bug for its mirror image — a model call that ran *before* the tool, in that same millisecond, would then hide a genuine orphan. The check now requires both that the call is not earlier by the clock **and** that it was created after the tool in tree order, since position is the causal tiebreaker a millisecond clock cannot provide. Five regression tests pin the edges.
+
 ### 0.1.1
 
 A UI/UX pass. Three of these were live defects rather than polish.

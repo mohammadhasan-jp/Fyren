@@ -291,17 +291,51 @@ function detectOrphanedToolCalls(
   const toolCalls = tree.filter((node) => node.type === 'tool_call' && node.status !== 'running');
   if (toolCalls.length === 0) return [];
 
-  const llmCallStarts = tree
-    .filter((node) => node.type === 'llm_call')
-    .map((node) => node.startedAt);
+  const llmCalls = tree.filter((node) => node.type === 'llm_call');
 
   const childrenByParent = buildChildrenByParent(tree);
+
+  /** Position in the tree array — the causal tiebreaker for same-millisecond nodes. */
+  const positionOf = new Map(tree.map((node, index) => [node.id, index]));
 
   const byToolName = new Map<string, { occurrences: number; avoidableCostUsd: number }>();
 
   for (const tool of toolCalls) {
     const endedAt = tool.endedAt ?? tool.startedAt;
-    const hadLaterLlmCall = llmCallStarts.some((startedAt) => startedAt > endedAt);
+
+    /*
+     * "Ran after this tool" needs TWO signals, because neither alone is
+     * enough at millisecond resolution.
+     *
+     * Timestamps are whole milliseconds, so a model call that genuinely ran
+     * after a fast tool routinely starts in the SAME millisecond the tool
+     * ended. Caught on real recorded data: a `search` tool ended at ...793
+     * and the next llm_call started at ...793, and a strict `>` reported it
+     * as orphaned — telling the user they wasted work on a tool whose result
+     * demonstrably did reach the model. Any sub-millisecond tool hits this:
+     * an in-process lookup, a cache hit, a stub in a test.
+     *
+     * But loosening to `>=` alone is worse, and swaps the bug rather than
+     * fixing it: a model call that ran BEFORE the tool, in that same
+     * millisecond, then counts as "after" and hides a genuine orphan. That is
+     * exactly the hit-iteration-cap case this pattern exists to catch.
+     *
+     * So: not-before by timestamp, AND created after the tool in tree order.
+     * `tree` is ordered by start time with ties left in insertion order, so
+     * position is the causal tiebreaker the clock cannot provide.
+     *
+     * The tool's OWN nested calls are excluded either way, so a tool that
+     * internally calls a model (see doc-qa-agent's search) can never
+     * un-orphan itself.
+     */
+    const ownNested = descendantIdsOf(childrenByParent, tool.id);
+    const toolPosition = positionOf.get(tool.id) ?? 0;
+    const hadLaterLlmCall = llmCalls.some(
+      (call) =>
+        !ownNested.has(call.id) &&
+        call.startedAt >= endedAt &&
+        (positionOf.get(call.id) ?? 0) > toolPosition,
+    );
     if (hadLaterLlmCall) continue; // the model got a chance to use it — not orphaned
 
     const nestedLlmCost = sumDescendantLlmCost(childrenByParent, tool.id, priceAsModel);
@@ -379,6 +413,22 @@ function detectRetries(tree: readonly RunNode[], priceAsModel: string | undefine
 }
 
 /** Sum the cost of every llm_call anywhere under `nodeId` — a tool can nest its own model calls. */
+/** Every node under `rootId`, so a tool call cannot be un-orphaned by its own nested work. */
+function descendantIdsOf(
+  childrenByParent: Map<string | null, RunNode[]>,
+  rootId: string,
+): Set<string> {
+  const ids = new Set<string>();
+  const queue = [...(childrenByParent.get(rootId) ?? [])];
+  while (queue.length > 0) {
+    const node = queue.pop()!;
+    if (ids.has(node.id)) continue;
+    ids.add(node.id);
+    queue.push(...(childrenByParent.get(node.id) ?? []));
+  }
+  return ids;
+}
+
 function sumDescendantLlmCost(
   childrenByParent: Map<string, RunNode[]>,
   nodeId: string,
