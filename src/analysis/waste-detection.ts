@@ -375,6 +375,7 @@ function detectRetries(tree: readonly RunNode[], priceAsModel: string | undefine
   if (failed.length === 0) return [];
 
   const childrenByParent = buildChildrenByParent(tree);
+  const positionOf = new Map(tree.map((node, index) => [node.id, index]));
   const byKey = new Map<
     string,
     { nodeType: 'llm_call' | 'tool_call'; name: string; wastedAttempts: number; avoidableCostUsd: number }
@@ -385,12 +386,30 @@ function detectRetries(tree: readonly RunNode[], priceAsModel: string | undefine
 
     const siblings = childrenByParent.get(call.parentId) ?? [];
     const endedAt = call.endedAt ?? call.startedAt;
+    const callPosition = positionOf.get(call.id) ?? 0;
+
+    /*
+     * Same millisecond-resolution problem as the orphan check above, in the
+     * opposite direction — found by asking whether that bug's CLASS existed
+     * elsewhere, not by a failing test.
+     *
+     * A strict `>` here misses retries rather than inventing them: an
+     * immediate retry — `catch { retry() }` with no backoff, which is the
+     * most common retry there is — starts in the same millisecond the failed
+     * attempt ended, and was silently not counted. That under-reports real
+     * waste, which is the gentler failure of the two but still wrong.
+     *
+     * Same fix, same reasoning: not earlier by the clock, AND created after
+     * the failed attempt in tree order, since position is the causal
+     * tiebreaker a millisecond clock cannot give.
+     */
     const hasSuccessor = siblings.some(
       (sibling) =>
         sibling.id !== call.id &&
         sibling.type === call.type &&
         sibling.name === call.name &&
-        sibling.startedAt > endedAt,
+        sibling.startedAt >= endedAt &&
+        (positionOf.get(sibling.id) ?? 0) > callPosition,
     );
     if (!hasSuccessor) continue; // failed and never retried — nothing was duplicated
 

@@ -723,6 +723,23 @@ What is left is **verification depth, not missing features**. One item, and it i
 
 ## Releases
 
+### 0.1.3
+
+**Bug fix — retry detection missed immediate retries.** The same
+millisecond-resolution problem as 0.1.2, found by asking whether that bug's
+*class* existed anywhere else rather than by waiting for a failure. It did:
+the retry check used the same strict `>` on whole-millisecond timestamps.
+
+Here it failed in the opposite direction — missing real waste instead of
+inventing it. A retry with no backoff (`catch { retry() }`, the most common
+kind there is) starts in the same millisecond the failed attempt ended, and
+was silently not counted. Under-reporting is the gentler of the two failures,
+but it is still the tool being wrong about money.
+
+Fixed the same way, with three regression tests: immediate retry, retry with
+backoff, and a same-named call that ran *before* the failure and is therefore
+not a retry of it.
+
 ### 0.1.2
 
 **Bug fix — orphaned-tool-call detection over-reported waste.** The check for "did a model call run after this tool?" compared whole-millisecond timestamps with a strict `>`, so a model call that genuinely ran after a fast tool — starting in the *same* millisecond it ended — was reported as an orphaned tool call. fyren was telling you a tool's result had been thrown away when it demonstrably reached the model.

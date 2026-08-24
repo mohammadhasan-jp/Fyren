@@ -1028,3 +1028,80 @@ test("a tool's own nested model call cannot un-orphan it, even at the same milli
 
   assert.deepEqual(orphanNames(tree), ['search']);
 });
+
+/* ------------------------------------------------------------------------ *
+ * The same millisecond-resolution problem in retry detection — found by
+ * asking whether the orphan bug's CLASS existed elsewhere, not by a failure.
+ *
+ * Here a strict `>` missed retries rather than inventing them: an immediate
+ * retry (`catch { retry() }` with no backoff, the most common kind there is)
+ * starts in the same millisecond the failed attempt ended, and was silently
+ * not counted. Under-reporting is the gentler of the two failures, but it is
+ * still the tool being wrong about money.
+ * ------------------------------------------------------------------------ */
+
+function retryTree(secondCall: { startedAt: number; status?: 'ok' | 'error' }): RunNode[] {
+  const T = 1_787_599_469_793;
+  const base = (over: Partial<RunNode> & Pick<RunNode, 'id' | 'type' | 'name'>): RunNode => ({
+    parentId: 'step-1',
+    rootId: 'run-1',
+    status: 'ok',
+    startedAt: T,
+    endedAt: T,
+    durationMs: 0,
+    tokens: { input: 100, output: 10, thinking: 0, cacheRead: 0, cacheWrite: 0 },
+    costUsd: 0,
+    provider: null,
+    model: 'claude-opus-5',
+    cacheSupported: true,
+    error: null,
+    metadata: {},
+    inputComposition: null,
+    ...over,
+  });
+
+  return [
+    base({ id: 'run-1', type: 'run', name: 'r', parentId: null, endedAt: T + 100 }),
+    base({ id: 'step-1', type: 'step', name: 's', parentId: 'run-1', endedAt: T + 90 }),
+    base({
+      id: 'failed',
+      type: 'llm_call',
+      name: 'claude-opus-5',
+      status: 'error',
+      error: 'timeout',
+      startedAt: T - 50,
+      endedAt: T,
+    }),
+    base({
+      id: 'second',
+      type: 'llm_call',
+      name: 'claude-opus-5',
+      status: secondCall.status ?? 'ok',
+      startedAt: secondCall.startedAt,
+      endedAt: secondCall.startedAt + 20,
+    }),
+  ];
+}
+
+const retriedNames = (tree: RunNode[]): string[] =>
+  detectWaste(tree)
+    .findings.filter((finding) => finding.type === 'retried_call')
+    .map((finding) => (finding as { name: string }).name);
+
+test('an immediate retry, in the same millisecond the failed attempt ended, is still counted', () => {
+  const tree = retryTree({ startedAt: 1_787_599_469_793 });
+
+  assert.deepEqual(retriedNames(tree), ['claude-opus-5'], 'a no-backoff retry is the commonest kind');
+});
+
+test('a retry with a real backoff is counted, as it always was', () => {
+  const tree = retryTree({ startedAt: 1_787_599_469_850 });
+
+  assert.deepEqual(retriedNames(tree), ['claude-opus-5']);
+});
+
+test('a same-named call that ran BEFORE the failure is not a retry of it', () => {
+  const tree = retryTree({ startedAt: 1_787_599_469_600 });
+
+  assert.deepEqual(retriedNames(tree), [], 'an earlier call cannot be a retry of a later failure');
+});
