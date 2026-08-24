@@ -64,45 +64,127 @@ npx fyren-ai                # or don't install it at all
 
 ## Quick start
 
-Wrap the client you already have. Your agent code doesn't change.
+Two lines of setup — create a profiler, wrap the client you already have. **Your agent code does not change.**
 
 ```ts
 import Anthropic from '@anthropic-ai/sdk';
-import { createProfiler, wrapAnthropic } from 'fyren-ai';
+import { createProfiler, wrapAnthropic, type AnthropicLike } from 'fyren-ai';
 
-const profiler = createProfiler();          // writes .fyren/runs.db
+const profiler = createProfiler();        // writes .fyren/runs.db
+const anthropic = new Anthropic();        // reads ANTHROPIC_API_KEY
 
-const runId = await profiler.run('my-agent', async (run) => {
-  await run.step('plan', async (step) => {
-    const client = wrapAnthropic(anthropic, step);
-    await client.messages.create({ model: 'claude-opus-5', max_tokens: 1024, messages });
+await profiler.run('my-agent', async (run) => {
+  // Everything sent through `client` is recorded. `anthropic` still works as normal.
+  const client = wrapAnthropic(anthropic as unknown as AnthropicLike, run);
+
+  const reply = await client.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 1024,
+    system: 'You are a helpful assistant.',
+    messages: [{ role: 'user', content: 'What is the capital of France?' }],
   });
 
-  const tool = run.startToolCall('search', { metadata: { query } });
-  // ... run the tool ...
-  tool.end();
+  console.log(reply.content);
+});
 
-  return run.rootId;
+profiler.close();                          // flushes to disk
+```
+
+Then look at what it cost you:
+
+```bash
+npx fyren                # runs, cost trend, where the tokens went
+npx fyren waste          # what it cost you that it didn't have to
+npx fyren ui             # the same thing in a browser
+```
+
+> The `as unknown as AnthropicLike` cast is expected, not a workaround. `AnthropicLike` is a loose
+> structural interface, which is what lets one wrapper cover four providers and lets the whole test
+> suite run against mocks with no network — see [Design notes](#design-notes). The real SDK's
+> `messages.create` is a stricter overloaded type; the cast is safe as long as you always pass
+> `max_tokens`, which the SDK requires anyway.
+
+### No API key? Run the whole thing against a local model
+
+If you have [Ollama](https://ollama.com) running, this costs nothing and needs no account. It is the
+same code as above with one line changed:
+
+```ts
+import { createProfiler, createOllamaClient, wrapAnthropic } from 'fyren-ai';
+
+const profiler = createProfiler();
+const ollama = createOllamaClient();       // http://localhost:11434
+
+await profiler.run('my-agent', async (run) => {
+  const client = wrapAnthropic(ollama, run, { provider: 'ollama', cacheSupported: false });
+
+  const reply = await client.messages.create({
+    model: 'qwen2.5:7b',
+    max_tokens: 256,
+    system: 'You are a terse assistant. Answer in one short sentence.',
+    messages: [{ role: 'user', content: 'What is the capital of France?' }],
+  });
+
+  console.log(reply.content);
 });
 
 profiler.close();
 ```
 
-Then look at it:
+`cacheSupported: false` matters: Ollama has no prompt cache, and saying so is what stops fyren from
+reporting "every call missed the cache" as if it were a bug you could fix. See
+[`cacheSupported`](#cachesupported--not-applicable-is-a-different-finding-than-zero).
+
+A local model reports `$0` for everything, which is true and completely unhelpful for deciding
+whether a prompt is too big. Add `--price-as` to see what those same tokens *would* cost on a
+hosted model — always labelled as hypothetical, never presented as real spend:
 
 ```bash
-fyren                    # runs, cost trend, where the tokens went
-fyren waste              # what it cost you that it didn't have to
-fyren ui                 # the same thing in a browser
+npx fyren waste --price-as claude-haiku-4-5
 ```
 
-`wrapAnthropic` returns a Proxy, so every SDK method you don't touch keeps working untouched.
-`messages.create` and `messages.stream` are instrumented. Despite the name it is provider-generic
-— OpenAI, Gemini and Ollama all go through it (see [Providers](#providers)).
+### Other providers
 
-**Nothing you send is ever stored.** fyren records *sizes* per segment, never prompt or
-tool-result text. That is a firm boundary, not a v1 shortcut — it bounds what the analysis can
-ever claim to detect, and shaped two of the three waste patterns.
+Same wrapper, different client. Your agent code never learns which provider it is on:
+
+```ts
+import { createOpenAiClient, createGeminiClient, createOllamaClient } from 'fyren-ai';
+
+wrapAnthropic(createOpenAiClient({ apiKey: process.env.OPENAI_API_KEY! }), run, { provider: 'openai' });
+wrapAnthropic(createGeminiClient({ apiKey: process.env.GEMINI_API_KEY! }), run, { provider: 'gemini' });
+wrapAnthropic(createOllamaClient(), run, { provider: 'ollama', cacheSupported: false });
+```
+
+### Structuring a bigger run
+
+`run` and `step` nest, and tool calls are recorded alongside model calls, so the tree shows you
+which part of your agent spent what:
+
+```ts
+await profiler.run('my-agent', async (run) => {
+  await run.step('plan', async (step) => {
+    const client = wrapAnthropic(anthropic as unknown as AnthropicLike, step);
+    await client.messages.create({ /* ... */ });
+  });
+
+  const tool = run.startToolCall('search', { metadata: { query } });
+  const results = await search(query);
+  tool.end();
+
+  await run.step('answer', async (step) => { /* ... */ });
+});
+```
+
+Both `run()` and `step()` close their node automatically, including when the callback throws — a
+crashed agent still leaves a readable partial tree rather than vanishing. For manual control,
+`startRun` / `startStep` / `startLlmCall` / `startToolCall` each return a handle with `.end()`.
+
+Every snippet above is checked: the runnable versions live in [`examples/`](./examples), and
+`npm run example` records a full mock agent with no network and no cost.
+
+**Nothing you send is ever stored.** fyren records *sizes* per segment, never prompt or tool-result
+text. That is a firm boundary, not a v1 shortcut — it bounds what the analysis can ever claim to
+detect, and it shaped two of the three waste patterns.
 
 ## The CLI
 
@@ -288,7 +370,7 @@ cd Fyren && npm install
 npm run check           # typecheck + 232 tests
 ```
 
-No build step, no watch process, no codegen. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+No build step, no watch process, no codegen.
 
 ## Providers
 
@@ -445,7 +527,7 @@ Every output labels which one produced the numbers — `measured via count_token
 
 ## Analysis #2 — waste detection
 
-Per PROJECT_CONTEXT.md §4c, three patterns are planned. All three are done:
+Three patterns were planned from the start. All three are done:
 
 1. **Uncached static content** — done (below)
 2. **Tool output that was never used** — done (below)
@@ -522,7 +604,7 @@ This one is easy to misread as a bug, so it gets its own heading. `detectStaticC
 
 Why not just one unit everywhere: a call's token estimate for a segment is that segment's **proportional share** of the call's real total (`weights[segment] / weightSum * totalInputTokens`). As a conversation's `history` grows call over call, a genuinely-static `system` segment's share of the growing total *shrinks* — same content, bigger denominator — so its token estimate silently drifts down even though nothing about the system prompt itself changed. Comparing on that drifting number would make the matcher stop recognizing an unchanged system prompt after a few turns of conversation. Character size doesn't have this problem: it only moves when the segment's own content actually changes, regardless of what grows around it — so that's the signal matching is built on. The token figure shown to the user still comes from the correctly-scaled per-call estimate; it's just not what decides *whether two occurrences match*.
 
-**This shipped wrong once**, in the first version of this file: `baselineTokens` was assigned straight from the character count instead of running it through `attributeCall` — reporting a number ~4x too large, in the wrong unit, inconsistent with `wastedTokens` (which was always correctly token-scaled). `test/waste-detection.test.ts` has a dedicated regression test — a static `system` segment alongside artificially-grown `history`, with hand-computed expected numbers — that fails immediately if this regresses. See [DECISIONS.md](./DECISIONS.md) for the full write-up.
+**This shipped wrong once**, in the first version of this file: `baselineTokens` was assigned straight from the character count instead of running it through `attributeCall` — reporting a number ~4x too large, in the wrong unit, inconsistent with `wastedTokens` (which was always correctly token-scaled). `test/waste-detection.test.ts` has a dedicated regression test — a static `system` segment alongside artificially-grown `history`, with hand-computed expected numbers — that fails immediately if this regresses. The lesson generalises: any code comparing sizes across calls has to be deliberate about whether it is in characters or tokens.
 
 ## Design notes
 
@@ -610,7 +692,7 @@ npm run example:real
 
 **Known gap, documented on purpose, not a blocker: this exact script has not yet been run against a funded `ANTHROPIC_API_KEY`.** The one real attempt returned an *insufficient credit* error, which the script now turns into a clear message rather than a crash (that failure is exactly what surfaced the shutdown bug documented above, and is now a regression test). This is narrower than it might sound: the same prefix-fill cache-attribution algorithm has *already* been verified against a real, live cache hit — see [Verified against a real cache hit](#verified-against-a-real-cache-hit) above — just on Gemini, not Anthropic yet. What's specifically untested is Anthropic's own usage shape, where cached tokens are reported as *additive* fields rather than a *subset* of the prompt count (see the [Providers](#providers) table) — the one piece of arithmetic per provider that genuinely differs and can't be exercised except against that provider's real API.
 
-fyren works fully with Anthropic today in every other respect — real instrumentation, real cost math, same test coverage as every other provider. Closing this is the single highest-priority item the moment a funded key exists (see [AGENT.md](./AGENT.md)), and it does not block using fyren on Anthropic traffic now. I do not create accounts or enter payment details to obtain a key myself, even on request — that's a firm boundary, not a resource problem. Run `npm run example:real` with your own key whenever you have one; it costs a few cents and closes this out immediately.
+fyren works fully with Anthropic today in every other respect — real instrumentation, real cost math, same test coverage as every other provider. Closing this is the single highest-priority item the moment a funded key exists, and it does not block using fyren on Anthropic traffic now. I do not create accounts or enter payment details to obtain a key myself, even on request — that's a firm boundary, not a resource problem. Run `npm run example:real` with your own key whenever you have one; it costs a few cents and closes this out immediately.
 
 ## Tests
 
@@ -639,11 +721,23 @@ Everything in the v1 scope is built — all three Waste Detection patterns, Vers
 
 What is left is **verification depth, not missing features**. One item, and it is the important one: Anthropic's cache-attribution math — the algorithm the entire Cost Breakdown and Waste Detection analysis is built around — has never been run against a real Anthropic cache hit. It is validated structurally via Gemini, which shares the same "are cached tokens additive or a subset" question, but not against its primary provider. OpenAI is likewise mock-only. Closing this needs a funded API key; see [`npm run example:real`](#npm-run-examplereal--hosted-claude-haiku-45-a-few-cents) above — it costs a few cents and closes the gap immediately.
 
-Full scope and acceptance criteria live in [PRD.md](./PRD.md), not here.
+## Releases
 
-## More docs
+### 0.1.0
 
-- [PRD.md](./PRD.md) — product scope, requirements, and status, kept current. The source of truth for "what's built and what's planned."
-- [DECISIONS.md](./DECISIONS.md) — every non-obvious technical decision, with why.
-- [AGENT.md](./AGENT.md) — orientation for AI agents (or anyone) picking up this codebase cold.
-- [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) — the original planning session (Persian). Historical; PRD.md has superseded it.
+First version meant to be installed by anyone other than its author.
+
+- **Published build.** Ships compiled JavaScript and `.d.ts` declarations, so it works on any bundler and any TypeScript version — not only on Node ≥ 22.18 running the sources directly. Development stays build-free; only the artifact is compiled.
+- **CLI grew from one command to seven** — `runs`, `breakdown [run]`, `waste [run]`, `diff`, `ui`, `doctor`, alongside the original bare summary, which still prints exactly what it always did. Run-id prefixes, `--price-as`, `--json`, and dependency-free ANSI colour throughout.
+- **`fyren diff`** exposes Version Diff, which previously had no user-facing surface at all.
+- **`fyren doctor`** checks the four ways this tool goes quietly wrong: Node version, `node:sqlite`, runs recorded with no composition data, and models with no pricing entry.
+- **Call-tree drill-down** in both the CLI and the web UI.
+- **Rebuilt web UI** — Overview / Runs / Waste tabs, a stacked composition bar, clickable runs with a per-run detail panel, live filters, and optional auto-refresh for watching an agent as it runs.
+- **Cost-trend bars now scale from zero**, not from the cheapest run. Min-max scaling rendered three near-identical runs as wild variance, which is a chart lying about the one thing it exists to show.
+- **CI** on Node 22.18 and 24, Linux and Windows, plus a job that installs the packed tarball into a clean project and typechecks a consumer against the published declarations with `skipLibCheck: false`.
+
+## License
+
+[MIT](./LICENSE) © mohammadhasan-jp
+
+Issues and pull requests: [github.com/mohammadhasan-jp/Fyren](https://github.com/mohammadhasan-jp/Fyren)

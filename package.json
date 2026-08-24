@@ -28,8 +28,7 @@
     "src",
     "!src/**/*.test.ts",
     "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "LICENSE"
   ],
   "sideEffects": false,
   "scripts": {
