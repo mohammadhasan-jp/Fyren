@@ -723,6 +723,18 @@ What is left is **verification depth, not missing features**. One item, and it i
 
 ## Releases
 
+### 0.1.1
+
+A UI/UX pass. Three of these were live defects rather than polish.
+
+- **Cost-trend charts now scale against zero** on both the terminal and the web, instead of against the cheapest run in the window. The old scaling lied in both directions: three runs differing by $0.000005 rendered as a dramatic climb, while a run genuinely costing 3x the others rendered as *less* dramatic than that, because the shape only ever encoded rank, never magnitude.
+- **The web trend chart is no longer a stretched SVG** that rendered a handful of runs as one solid slab.
+- **Rows in the runs table are keyboard-accessible.** They open the per-run drill-down, and were click-only — which made the entire per-run view unreachable without a mouse. Tabs got roving `tabindex` and arrow-key navigation at the same time.
+- **Colour is no longer the only thing identifying a segment**: the composition bar labels its segments and carries a legend, and the cost chart shows its peak value permanently rather than only on hover.
+- **A long agent name no longer pushes the cost column off the terminal** — the runs table caps that one column; `--json` is never truncated.
+- Light-mode green was below WCAG AA (4.07:1) and is now 5.84:1.
+- `prefers-reduced-motion` is respected, and there is a skip link.
+
 ### 0.1.0
 
 First version meant to be installed by anyone other than its author.

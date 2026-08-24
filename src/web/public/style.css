@@ -23,7 +23,7 @@
 
   --accent: #3b5bdb;
   --accent-soft: #e7ecfd;
-  --good: #2f8f4e;
+  --good: #25733d;
   --warn: #b25a00;
   --warn-soft: #fdf3e6;
   --bad: #c02d2d;
@@ -34,7 +34,7 @@
   --seg-1: #7048e8;
   --seg-2: #0c8599;
   --seg-3: #e8590c;
-  --seg-4: #2f8f4e;
+  --seg-4: #25733d;
 
   --radius: 10px;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -207,7 +207,7 @@ h2 {
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(clamp(140px, 15vw, 170px), 1fr));
   gap: 0.75rem;
 }
 
@@ -336,14 +336,6 @@ table.selectable tbody tr[aria-selected='true'] { background: var(--accent-soft)
 .pill.error { background: var(--bad-soft); color: var(--bad); }
 .pill.running { background: var(--warn-soft); color: var(--warn); }
 
-/* ----------------------------------------------------------------- trend */
-
-.trend svg { display: block; width: 100%; height: 130px; overflow: visible; }
-.trend .bar { fill: var(--accent); }
-.trend .bar:hover { fill: var(--seg-1); }
-.trend .axis { stroke: var(--border); stroke-width: 1; }
-.trend .caption { color: var(--fg-muted); font: 12px var(--mono); margin-top: 0.5rem; }
-
 /* ---------------------------------------------------------------- detail */
 
 .detail {
@@ -420,4 +412,140 @@ table.selectable tbody tr[aria-selected='true'] { background: var(--accent-soft)
 @media (max-width: 640px) {
   .topbar { align-items: flex-start; }
   main, .status { padding: 1rem; }
+}
+
+/* ----------------------------------------------------------------- trend */
+
+/*
+ * HTML bars rather than a stretched SVG.
+ *
+ * The first version was an SVG with preserveAspectRatio="none", which stretched
+ * four bars into four full-width blocks that read as a solid slab, not a chart.
+ * Flex bars with a max-width cannot distort: few runs stay bar-shaped, many
+ * runs shrink evenly.
+ *
+ * Heights are set from cost/max — scaled against zero, never against the
+ * cheapest run. See DECISIONS.md; the terminal sparkline had the same bug.
+ */
+
+.trend-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 128px;
+  padding-top: 1.1rem;
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.trend-bar {
+  position: relative;
+  flex: 1 1 0;
+  max-width: 44px;
+  min-height: 2px;
+  height: var(--h);
+  background: var(--accent);
+  border-radius: 3px 3px 0 0;
+  transition: background 0.15s ease;
+  cursor: default;
+}
+
+.trend-bar:hover,
+.trend-bar:focus-visible {
+  background: var(--seg-1);
+}
+
+/* The peak run is labelled permanently: a bar chart whose only value readout
+   is a hover tooltip tells a keyboard or touch user nothing at all. */
+.trend-bar .peak {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 3px;
+  font: 10px var(--mono);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.trend .caption {
+  color: var(--fg-muted);
+  font: 12px var(--mono);
+  margin-top: 0.5rem;
+}
+
+/* --------------------------------------------------------------- legend */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.6rem;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* A label sitting inside its own segment, for the segments wide enough to
+   hold one. Colour alone must not be the only thing identifying a slice. */
+.stack .seg-label {
+  font: 10px/30px var(--sans);
+  font-weight: 600;
+  color: #fff;
+  padding-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-shadow: 0 0 3px rgb(0 0 0 / 45%);
+}
+
+/* ------------------------------------------------------- keyboard access */
+
+/*
+ * Rows in the runs table open a drill-down, so they are controls, not text.
+ * They were click-only: no tab stop, no Enter/Space, no focus ring — the whole
+ * per-run view was unreachable without a mouse.
+ */
+table.selectable tbody tr:focus-visible,
+.tab:focus-visible,
+.trend-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--surface);
+  color: var(--fg);
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: 0 0 var(--radius) 0;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* ------------------------------------------------------- reduced motion */
+
+/*
+ * Honour the OS setting. Nothing here is load-bearing animation — it is all
+ * hover and state transitions — so it can be turned off outright rather than
+ * softened.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

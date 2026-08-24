@@ -324,3 +324,42 @@ test('$FYREN_DB supplies the default database, and --db still wins over it', asy
     }
   });
 });
+
+test('a long agent name does not push the cost column off the terminal', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'fyren-cli-wide-'));
+  const dbPath = path.join(dir, 'runs.db');
+  const longName = 'my-really-long-production-agent-name-that-someone-will-absolutely-use';
+
+  try {
+    const profiler = createProfiler({ dbPath });
+    const run = profiler.startRun(longName);
+    const call = run.startLlmCall('claude-opus-5', { model: 'claude-opus-5' });
+    call.end({ tokens: { input: 400, output: 20, thinking: 0, cacheRead: 0, cacheWrite: 0 } });
+    run.end();
+    profiler.close();
+
+    const table = await cli(['runs', '--db', dbPath]);
+    const widest = Math.max(...table.out.split('\n').map((line) => line.length));
+    assert.ok(widest <= 100, `runs table is ${widest} columns wide, which wraps in a normal terminal`);
+    assert.match(table.out, /…/, 'the long name should be visibly truncated, not silently cut');
+
+    // Truncation is presentation only — the real name must survive for scripts.
+    const json = await cli(['runs', '--db', dbPath, '--json']);
+    const parsed = JSON.parse(json.out) as { runs: Array<{ name: string }> };
+    assert.equal(parsed.runs[0]?.name, longName);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--json keeps stdout pure even when a warning is emitted, so it can be piped', async () => {
+  await withDb(async ({ dbPath }) => {
+    const result = await cli(['waste', '--db', dbPath, '--price-as', 'not-a-real-model', '--json']);
+
+    assert.equal(result.code, 0);
+    assert.doesNotThrow(() => JSON.parse(result.out), 'stdout must be parseable JSON');
+    // The warning belongs on stderr; on stdout it would corrupt `| jq`.
+    assert.match(result.err, /no pricing entry/);
+    assert.doesNotMatch(result.out, /warning/);
+  });
+});

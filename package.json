@@ -1,6 +1,6 @@
 {
   "name": "fyren-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A local-first token profiler for LLM and agent developers. Shows where your input tokens went — system prompt, tool definitions, history, tool results — and which of them were avoidable. Zero dependencies, no account, no server.",
   "type": "module",
   "license": "MIT",

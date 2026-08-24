@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="brand">
     <span class="logo" aria-hidden="true"></span>
@@ -51,16 +52,17 @@
 
   <div class="banners" id="banners"></div>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" class="tab" data-tab="overview" aria-selected="true">Overview</button>
-    <button role="tab" class="tab" data-tab="runs" aria-selected="false">Runs</button>
-    <button role="tab" class="tab" data-tab="waste" aria-selected="false">Waste</button>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" class="tab" data-tab="overview" id="tab-overview" aria-controls="panel-overview" aria-selected="true">Overview</button>
+    <button role="tab" class="tab" data-tab="runs" id="tab-runs" aria-controls="panel-runs" aria-selected="false" tabindex="-1">Runs</button>
+    <button role="tab" class="tab" data-tab="waste" id="tab-waste" aria-controls="panel-waste" aria-selected="false" tabindex="-1">Waste</button>
   </nav>
 
-  <section class="panel" id="panel-overview" role="tabpanel">
+  <section class="panel" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
     <h2>Where the input tokens went</h2>
     <p class="hint" id="composition-hint"></p>
     <div id="composition-bar" class="stack"></div>
+    <div id="composition-legend" class="legend"></div>
     <div class="scroll-x"><table id="breakdown-table" class="data"></table></div>
     <p class="footnote">
       <strong>avg/run</strong> weights every run equally. <strong>pooled</strong> is the share of all
@@ -71,12 +73,12 @@
     <div id="trend" class="trend"></div>
   </section>
 
-  <section class="panel" id="panel-runs" role="tabpanel" hidden>
+  <section class="panel" id="panel-runs" role="tabpanel" aria-labelledby="tab-runs" tabindex="0" hidden>
     <div class="scroll-x"><table id="runs-table" class="data selectable"></table></div>
     <div id="run-detail" class="detail" hidden></div>
   </section>
 
-  <section class="panel" id="panel-waste" role="tabpanel" hidden>
+  <section class="panel" id="panel-waste" role="tabpanel" aria-labelledby="tab-waste" tabindex="0" hidden>
     <h2>Avoidable spend</h2>
     <p class="hint" id="waste-hint"></p>
     <div id="waste-findings"></div>

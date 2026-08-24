@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 
 import type { CliContext } from '../index.ts';
 import { printJson, withProfiler } from '../session.ts';
-import { int, relativeTime, table } from '../format.ts';
+import { int, relativeTime, table, truncate } from '../format.ts';
 import { isPricingKnown } from '../../pricing.ts';
 import { DatabaseSync } from '../../sqlite.ts';
 import { packageVersion } from '../version.ts';
@@ -82,7 +82,7 @@ export async function doctorCommand(ctx: CliContext): Promise<number> {
       table(
         [{ header: 'name' }, { header: 'runs', align: 'right' }, { header: 'last seen', align: 'right' }],
         payload.runNames.map((entry) => [
-          entry.name,
+          truncate(entry.name, 60),
           int(entry.runCount),
           palette.dim(relativeTime(entry.lastStartedAt)),
         ]),
@@ -97,7 +97,7 @@ export async function doctorCommand(ctx: CliContext): Promise<number> {
       table(
         [{ header: 'model' }, { header: 'calls', align: 'right' }, { header: 'pricing' }],
         payload.models.map((entry) => [
-          entry.model,
+          truncate(entry.model, 40),
           int(entry.callCount),
           entry.priced
             ? palette.green('known')

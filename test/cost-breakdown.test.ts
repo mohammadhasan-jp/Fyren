@@ -19,6 +19,7 @@ import {
 } from '../src/analysis/cost-breakdown.ts';
 import { createProfiler } from '../src/index.ts';
 import type { InputComposition, RunNode, SegmentSizes, TokenBreakdown } from '../src/index.ts';
+import type { RunCostBreakdown } from '../src/analysis/cost-breakdown.ts';
 
 const EQUAL_CHARS: SegmentSizes = {
   toolDefs: 100,
@@ -874,4 +875,95 @@ test('formatCostTrend reverses newest-first input to chronological order and rep
   assert.ok(out.includes(`min $${cheap.totalCostUsd.toFixed(6)}`));
   assert.ok(out.includes(`max $${expensive.totalCostUsd.toFixed(6)}`));
   assert.ok(out.includes(`avg $${avg.toFixed(6)}`));
+});
+
+/* ------------------------------------------------------------------------ *
+ * formatCostTrend scales against zero, not against the cheapest run.
+ *
+ * This shipped wrong. Min-max scaling is the usual way to make a sparkline
+ * use its full height, and it lied in both directions at once: three runs
+ * differing by $0.000005 rendered as `▁▅█` (reads as a tripling), while a run
+ * genuinely costing 3x the others rendered as `▁▁█` — LESS dramatic than the
+ * identical case, because the shape only ever encoded rank within the window,
+ * never magnitude. For a chart whose whole job is "is this getting more
+ * expensive?", that is exactly backwards.
+ *
+ * Nothing caught it because nothing asserted on the sparkline itself, only on
+ * the min/max/avg line under it. These tests assert on the blocks.
+ * ------------------------------------------------------------------------ */
+
+/** A breakdown carrying nothing but a total cost — all `formatCostTrend` reads. */
+function runCosting(costUsd: number, index: number): RunCostBreakdown {
+  return {
+    runId: `run-${index}`,
+    name: 'trend-fixture',
+    startedAt: 1_700_000_000_000 + index * 1000,
+    durationMs: 1,
+    status: 'ok',
+    llmCallCount: 1,
+    attributedCallCount: 1,
+    unpricedCallCount: 0,
+    precision: 'estimated',
+    cacheBoundaryUncertain: false,
+    uncertainCacheCallCount: 0,
+    cacheSupport: 'yes',
+    cacheUnsupportedCallCount: 0,
+    pricingMode: 'actual',
+    pricedAsModel: null,
+    totalInputTokens: 1,
+    totalOutputTokens: 1,
+    inputCostUsd: costUsd,
+    outputCostUsd: 0,
+    totalCostUsd: costUsd,
+    unattributedInputTokens: 0,
+    unattributedInputCostUsd: 0,
+    segments: [],
+  };
+}
+
+/** `formatCostTrend` takes newest-first and reverses internally. */
+function sparklineOf(costsNewestFirst: readonly number[]): string {
+  const out = formatCostTrend(costsNewestFirst.map(runCosting));
+  const match = /newest \(\d+ runs\): (.+)$/m.exec(out);
+  assert.ok(match, `no sparkline found in:\n${out}`);
+  return match[1]!.trim();
+}
+
+test('formatCostTrend renders effectively-identical runs as flat, not as a dramatic climb', () => {
+  // Differ by $0.000005 — identical for any decision a reader would make.
+  const sparkline = sparklineOf([0.014255, 0.014253, 0.014250]);
+
+  assert.equal(new Set(sparkline).size, 1, `expected one repeated block, got "${sparkline}"`);
+});
+
+test('formatCostTrend makes a genuinely more expensive run taller than the cheap ones', () => {
+  const sparkline = sparklineOf([0.03, 0.01, 0.01]);
+  const blocks = '▁▂▃▄▅▆▇█';
+
+  // Rendered oldest → newest, so the 3x run is last.
+  const [cheapA, cheapB, expensive] = [...sparkline];
+  assert.equal(cheapA, cheapB, 'the two equal runs must render identically');
+  assert.ok(
+    blocks.indexOf(expensive!) > blocks.indexOf(cheapA!),
+    `the 3x run should be taller: "${sparkline}"`,
+  );
+  // And it must be the FULL block — it is the max of the window.
+  assert.equal(expensive, '█');
+});
+
+test('formatCostTrend heights are proportional to cost, so the shape carries magnitude', () => {
+  const sparkline = sparklineOf([0.04, 0.02, 0.01]);
+  const blocks = '▁▂▃▄▅▆▇█';
+  const levels = [...sparkline].map((block) => blocks.indexOf(block));
+
+  // Oldest → newest: 0.01, 0.02, 0.04 — each double the last, and the top of
+  // the scale is the most expensive run.
+  assert.deepEqual(levels, [Math.round(7 / 4), Math.round(7 / 2), 7]);
+});
+
+test('formatCostTrend on an all-free run set is flat and does not divide by zero', () => {
+  const sparkline = sparklineOf([0, 0, 0]);
+
+  assert.equal(sparkline, '▁▁▁');
+  assert.doesNotMatch(sparkline, /NaN|undefined/);
 });

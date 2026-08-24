@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { paletteFor, visibleLength, NO_COLOR_PALETTE } from '../src/cli/colors.ts';
-import { bar, duration, int, pct, relativeTime, table, usd } from '../src/cli/format.ts';
+import { bar, duration, int, pct, relativeTime, table, truncate, usd } from '../src/cli/format.ts';
 
 const ESC = String.fromCharCode(27);
 
@@ -119,4 +119,11 @@ test('bar clamps rather than overflowing its width on out-of-range input', () =>
   assert.equal(bar(2, 4), '####', 'over 100%');
   assert.equal(bar(-1, 4), '....', 'negative');
   assert.equal(bar(Number.NaN, 4), '....', 'NaN from a 0/0 share');
+});
+
+test('truncate caps a cell so one long value cannot widen the whole table', () => {
+  assert.equal(truncate('short', 10), 'short');
+  assert.equal(truncate('exactlyten', 10), 'exactlyten', 'a value at the limit is untouched');
+  assert.equal(truncate('this-is-far-too-long', 10), 'this-is-f…');
+  assert.equal(truncate('this-is-far-too-long', 10).length, 10, 'result must respect the cap');
 });

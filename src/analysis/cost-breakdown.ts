@@ -735,12 +735,26 @@ export function formatCostTrend(breakdowns: readonly RunCostBreakdown[]): string
   const min = Math.min(...costs);
   const max = Math.max(...costs);
 
-  // Every run costs the same (often everyone's $0 on a free/local provider) —
-  // a flat line, not a divide-by-zero.
-  const flat = max === min;
+  /*
+   * Bars are scaled against ZERO, not against the cheapest run.
+   *
+   * Min-max scaling is the usual way to make a sparkline use its full height,
+   * and on this data it lies in both directions. Three runs costing $0.014250,
+   * $0.014253 and $0.014255 — identical for any decision a reader might make —
+   * came out as `▁▅█`, which reads as a tripling. Meanwhile a run genuinely
+   * costing 3x the other two came out as `▁▁█`, i.e. *less* dramatic than the
+   * identical case, because the shape only ever encodes rank within the
+   * window, never magnitude.
+   *
+   * For a chart whose entire job is "is this getting more expensive?", that is
+   * exactly backwards. Zero-based bars are boring when nothing changed, which
+   * is the correct thing for them to be. The same fix was applied to the web
+   * UI's trend chart; see DECISIONS.md.
+   */
   const blocks = '▁▂▃▄▅▆▇█';
+  const top = blocks.length - 1;
   const sparkline = costs
-    .map((cost) => (flat ? blocks[0] : blocks[Math.round(((cost - min) / (max - min)) * (blocks.length - 1))]))
+    .map((cost) => blocks[max > 0 ? Math.round((cost / max) * top) : 0])
     .join('');
 
   const avg = costs.reduce((sum, cost) => sum + cost, 0) / costs.length;

@@ -50,6 +50,20 @@ export function colorStatus(status: NodeStatus, palette: Palette): string {
   return palette.yellow(status);
 }
 
+/**
+ * Cap a cell so one outlier cannot widen the whole table past the terminal.
+ *
+ * A single long agent name pushed the runs table to ~170 columns, which wraps
+ * in any normal terminal and shoves the cost column — the thing the reader
+ * came for — off the right edge. Truncating the one free-text column keeps the
+ * numeric ones where they belong. The full value is never lost: it is intact
+ * in `--json`, and `fyren doctor` lists run names at their full width.
+ */
+export function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
 export type Align = 'left' | 'right';
 
 export interface Column {

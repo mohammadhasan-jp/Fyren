@@ -170,13 +170,30 @@ function renderComposition(aggregate) {
       : `${int(aggregate.runCount)} run(s), ${int(aggregate.llmCallCount)} llm call(s) — ` +
         `${aggregate.precision === 'measured' ? 'measured with the provider’s token counter' : aggregate.precision === 'mixed' ? 'mixed: some calls measured, some estimated from character counts' : 'estimated from character counts'}.`;
 
+  // Colour must not be the only thing identifying a slice, so every segment
+  // wide enough to hold text carries its own percentage, and a legend below
+  // names all of them regardless of width.
   $('composition-bar').replaceChildren(
     ...segments.map((segment) => {
       const node = el('div', { className: 'seg' });
       node.style.width = `${segment.pooledShare * 100}%`;
       node.style.background = segmentColor(segment.segment);
       node.title = `${segment.label} — ${pct(segment.pooledShare)}, ${int(segment.tokens)} tokens, ${usd(segment.costUsd)}`;
+      if (segment.pooledShare >= 0.08) {
+        node.append(el('span', { className: 'seg-label', textContent: pct(segment.pooledShare) }));
+      }
       return node;
+    }),
+  );
+
+  $('composition-legend').replaceChildren(
+    ...segments.map((segment) => {
+      const swatch = el('span', { className: 'swatch' });
+      swatch.style.background = segmentColor(segment.segment);
+      return el('span', { className: 'legend-item' }, [
+        swatch,
+        document.createTextNode(`${segment.label} ${pct(segment.pooledShare)}`),
+      ]);
     }),
   );
 
@@ -224,36 +241,39 @@ function renderTrend(breakdowns) {
   const costs = chronological.map((run) => run.totalCostUsd);
   const max = Math.max(...costs);
   const avg = costs.reduce((sum, c) => sum + c, 0) / costs.length;
+  const peakIndex = costs.indexOf(max);
 
-  const width = 100;
-  const height = 40;
-  const gap = costs.length > 40 ? 0.3 : 1.5;
-  const barWidth = Math.max(0.5, width / costs.length - gap);
-
-  const chart = svg('svg', { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: 'none' });
-
-  costs.forEach((cost, i) => {
-    // Bars are drawn against zero, not against the minimum. Scaling from the
-    // cheapest run makes a set of nearly identical runs look wildly variable,
-    // which is a chart that lies about the thing it is for.
-    const level = max > 0 ? cost / max : 0;
-    const barHeight = Math.max(0.4, level * height);
-    const rect = svg('rect', {
-      class: 'bar',
-      x: i * (barWidth + gap),
-      y: height - barHeight,
-      width: barWidth,
-      height: barHeight,
-    });
-    const title = svg('title');
-    title.textContent = `${chronological[i].name} — ${usd(cost)} — ${new Date(chronological[i].startedAt).toLocaleString()}`;
-    rect.append(title);
-    chart.append(rect);
+  const plot = el('div', {
+    className: 'trend-plot',
+    role: 'img',
+    // One accessible summary for the whole chart. Per-bar detail lives on each
+    // bar's own label, so a screen reader is not forced through 50 of them.
+    ariaLabel:
+      `Cost per run, oldest to newest, ${costs.length} run(s). ` +
+      `Highest ${usd(max)}, average ${usd(avg)}.`,
   });
 
-  chart.append(svg('line', { class: 'axis', x1: 0, y1: height, x2: width, y2: height }));
+  costs.forEach((cost, i) => {
+    // Scaled against zero, never against the cheapest run — see the comment in
+    // style.css and DECISIONS.md.
+    const level = max > 0 ? cost / max : 0;
+    const bar = el('div', {
+      className: 'trend-bar',
+      tabIndex: 0,
+      title: `${chronological[i].name} — ${usd(cost)} — ${new Date(chronological[i].startedAt).toLocaleString()}`,
+    });
+    bar.style.setProperty('--h', `${Math.max(1.5, level * 100)}%`);
+    bar.setAttribute('aria-label', `${chronological[i].name}: ${usd(cost)}`);
 
-  container.append(chart);
+    // The peak carries a permanent value label. A chart whose only readout is
+    // a hover tooltip tells a keyboard or touch user nothing.
+    if (i === peakIndex && max > 0) {
+      bar.append(el('span', { className: 'peak', textContent: usd(max) }));
+    }
+    plot.append(bar);
+  });
+
+  container.append(plot);
   container.append(
     el('p', {
       className: 'caption',
@@ -294,7 +314,19 @@ function renderRuns(breakdowns) {
           el('td', { className: 'num', textContent: usd(run.totalCostUsd) }),
         ]);
         row.setAttribute('aria-selected', String(run.runId === state.selectedRunId));
+
+        // A row opens the drill-down, which makes it a control, not text. It
+        // was click-only — no tab stop, no Enter/Space — so the entire per-run
+        // view was unreachable without a mouse.
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('aria-label', `Open run ${run.name}, ${usd(run.totalCostUsd)}`);
         row.addEventListener('click', () => selectRun(run.runId));
+        row.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();   // Space would otherwise scroll the page
+          selectRun(run.runId);
+        });
         return row;
       }),
     ),
@@ -513,14 +545,36 @@ function renderWaste(waste) {
 
 /* ------------------------------------------------------------------ tabs */
 
-function showTab(tab) {
+const TABS = ['overview', 'runs', 'waste'];
+
+function showTab(tab, { focus = false } = {}) {
   state.tab = tab;
   for (const button of document.querySelectorAll('.tab')) {
-    button.setAttribute('aria-selected', String(button.dataset.tab === tab));
+    const selected = button.dataset.tab === tab;
+    button.setAttribute('aria-selected', String(selected));
+    // Roving tabindex: the tablist is ONE tab stop, and arrow keys move within
+    // it. Leaving every tab focusable makes a keyboard user tab through all of
+    // them to reach the content, which is what the ARIA pattern exists to fix.
+    button.tabIndex = selected ? 0 : -1;
+    if (selected && focus) button.focus();
   }
-  for (const name of ['overview', 'runs', 'waste']) {
+  for (const name of TABS) {
     $(`panel-${name}`).hidden = name !== tab;
   }
+}
+
+function onTabKeydown(event) {
+  const offset = { ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity }[event.key];
+  if (offset === undefined) return;
+  event.preventDefault();
+
+  const current = TABS.indexOf(state.tab);
+  const next =
+    offset === -Infinity ? 0
+    : offset === Infinity ? TABS.length - 1
+    : (current + offset + TABS.length) % TABS.length;
+
+  showTab(TABS[next], { focus: true });
 }
 
 /* ------------------------------------------------------------------ load */
@@ -602,6 +656,7 @@ function setAutoRefresh(on) {
 function main() {
   for (const button of document.querySelectorAll('.tab')) {
     button.addEventListener('click', () => showTab(button.dataset.tab));
+    button.addEventListener('keydown', onTabKeydown);
   }
   $('controls').addEventListener('submit', (event) => event.preventDefault());
   $('filter-name').addEventListener('change', refresh);

@@ -4,8 +4,11 @@
 
 import type { CliContext } from '../index.ts';
 import { emptyDatabaseMessage, printJson, selectorFor, withProfiler } from '../session.ts';
-import { colorStatus, duration, int, relativeTime, table, usd } from '../format.ts';
+import { colorStatus, duration, int, relativeTime, table, truncate, usd } from '../format.ts';
 import type { RunCostBreakdown } from '../../analysis/cost-breakdown.ts';
+
+/** Wide enough for a descriptive agent name, narrow enough to keep the table under ~100 columns. */
+const NAME_WIDTH = 32;
 
 export async function runsCommand(ctx: CliContext): Promise<number> {
   return withProfiler(ctx, (profiler) => {
@@ -34,7 +37,7 @@ export function runsTable(breakdowns: readonly RunCostBreakdown[], ctx: CliConte
 
   const rows = breakdowns.map((run) => [
     palette.cyan(run.runId.slice(0, 8)),
-    run.name,
+    truncate(run.name, NAME_WIDTH),
     colorStatus(run.status, palette),
     palette.dim(relativeTime(run.startedAt)),
     palette.dim(duration(run.durationMs)),
