@@ -4,6 +4,7 @@ node_modules/
 *.db-wal
 *.db-shm
 dist/
+*.tgz
 .env
 graphify-out/
 

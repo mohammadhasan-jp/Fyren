@@ -1,0 +1,423 @@
+/*
+ * The web UI's stylesheet. Hand-written, no framework, no CDN — the same
+ * constraint as the server (see DECISIONS.md): "no data leaves the machine"
+ * has to be true without an asterisk, and a remote font or stylesheet is an
+ * asterisk.
+ *
+ * Colours are defined once as tokens on :root, with a dark set behind
+ * prefers-color-scheme. Segment colours are the one palette shared with the
+ * chart marks, so a segment is the same colour in the bar, the table swatch,
+ * and the legend.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfbfd;
+  --surface: #ffffff;
+  --surface-2: #f4f5f8;
+  --fg: #16181d;
+  --fg-muted: #61656e;
+  --border: #e3e5ea;
+  --border-strong: #cdd0d8;
+
+  --accent: #3b5bdb;
+  --accent-soft: #e7ecfd;
+  --good: #2f8f4e;
+  --warn: #b25a00;
+  --warn-soft: #fdf3e6;
+  --bad: #c02d2d;
+  --bad-soft: #fdecec;
+
+  /* One colour per input segment, in SEGMENT_ORDER. */
+  --seg-0: #3b5bdb;
+  --seg-1: #7048e8;
+  --seg-2: #0c8599;
+  --seg-3: #e8590c;
+  --seg-4: #2f8f4e;
+
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #161920;
+    --surface-2: #1c2028;
+    --fg: #e6e8ec;
+    --fg-muted: #9aa0ac;
+    --border: #262b35;
+    --border-strong: #39404d;
+
+    --accent: #7d9bff;
+    --accent-soft: #1c2438;
+    --good: #5ec27e;
+    --warn: #e0a458;
+    --warn-soft: #2b2213;
+    --bad: #f0736e;
+    --bad-soft: #2e1a1a;
+
+    --seg-0: #7d9bff;
+    --seg-1: #b197fc;
+    --seg-2: #4dd0e1;
+    --seg-3: #ffa94d;
+    --seg-4: #69db7c;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------- topbar */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.brand { display: flex; align-items: center; gap: 0.75rem; }
+
+.logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: linear-gradient(150deg, var(--seg-3), var(--seg-1));
+  flex: none;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.db {
+  margin: 0;
+  font: 12px/1.3 var(--mono);
+  color: var(--fg-muted);
+  word-break: break-all;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+
+.controls select,
+.controls input[type='text'],
+.controls input:not([type]) {
+  font: 13px var(--mono);
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 0.35rem 0.5rem;
+  min-width: 8rem;
+}
+
+.controls .price-as input { min-width: 12rem; }
+
+.controls select:focus-visible,
+.controls input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.controls .auto {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+button.ghost {
+  font: 13px var(--sans);
+  color: var(--fg);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+button.ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ------------------------------------------------------------------ main */
+
+main, .status { max-width: 1080px; margin: 0 auto; padding: 1.5rem; }
+
+.status {
+  color: var(--fg-muted);
+  font: 13px var(--mono);
+}
+
+.status.error { color: var(--bad); }
+
+h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-muted);
+  margin: 2rem 0 0.6rem;
+  font-weight: 650;
+}
+
+.panel > h2:first-child { margin-top: 0; }
+
+.hint, .footnote {
+  color: var(--fg-muted);
+  font-size: 13px;
+  margin: 0.4rem 0 0.9rem;
+}
+
+.footnote { margin-top: 0.7rem; font-size: 12px; }
+
+/* ------------------------------------------------------------------ kpis */
+
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.85rem;
+}
+
+.kpi .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+
+.kpi .value {
+  font: 600 1.15rem/1.3 var(--mono);
+  letter-spacing: -0.02em;
+  word-break: break-all;
+}
+
+.kpi.is-warn .value { color: var(--warn); }
+
+/* --------------------------------------------------------------- banners */
+
+.banners:not(:empty) { margin-top: 1rem; }
+
+.banner {
+  border: 1px solid var(--border-strong);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: 0.6rem 0.85rem;
+  margin-bottom: 0.6rem;
+  font-size: 13px;
+}
+
+.banner.warn { background: var(--warn-soft); border-left-color: var(--warn); }
+.banner.info { background: var(--accent-soft); border-left-color: var(--accent); }
+
+.banner strong { font-weight: 650; }
+
+/* ------------------------------------------------------------------ tabs */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-muted);
+  font: 600 13px var(--sans);
+  padding: 0.5rem 0.85rem;
+  cursor: pointer;
+}
+
+.tab[aria-selected='true'] { color: var(--fg); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--fg); }
+
+/* ----------------------------------------------------------------- stack */
+
+.stack { display: flex; height: 30px; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+
+.stack .seg { min-width: 2px; transition: filter 0.12s; }
+.stack .seg:hover { filter: brightness(1.15); }
+
+/* ---------------------------------------------------------------- tables */
+
+.scroll-x { overflow-x: auto; }
+
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  font: 13px var(--mono);
+  margin-top: 0.9rem;
+}
+
+table.data th,
+table.data td {
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+table.data th {
+  color: var(--fg-muted);
+  font: 600 11px var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+table.data td.num, table.data th.num { text-align: right; }
+
+table.data tbody tr:hover { background: var(--surface-2); }
+
+table.selectable tbody tr { cursor: pointer; }
+table.selectable tbody tr[aria-selected='true'] { background: var(--accent-soft); }
+
+.swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 0.5rem;
+  vertical-align: baseline;
+}
+
+.pill {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border-radius: 20px;
+  font-size: 11px;
+  font-family: var(--sans);
+  font-weight: 600;
+}
+
+.pill.ok { background: color-mix(in srgb, var(--good) 15%, transparent); color: var(--good); }
+.pill.error { background: var(--bad-soft); color: var(--bad); }
+.pill.running { background: var(--warn-soft); color: var(--warn); }
+
+/* ----------------------------------------------------------------- trend */
+
+.trend svg { display: block; width: 100%; height: 130px; overflow: visible; }
+.trend .bar { fill: var(--accent); }
+.trend .bar:hover { fill: var(--seg-1); }
+.trend .axis { stroke: var(--border); stroke-width: 1; }
+.trend .caption { color: var(--fg-muted); font: 12px var(--mono); margin-top: 0.5rem; }
+
+/* ---------------------------------------------------------------- detail */
+
+.detail {
+  margin-top: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.detail-head h3 { margin: 0; font-size: 0.95rem; }
+.detail-head .id { font: 12px var(--mono); color: var(--fg-muted); }
+
+.tree {
+  font: 12.5px/1.7 var(--mono);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  white-space: pre;
+  margin-top: 0.9rem;
+}
+
+.tree .t-llm { color: var(--seg-1); }
+.tree .t-tool { color: var(--seg-2); }
+.tree .t-step, .tree .t-run { color: var(--fg-muted); }
+.tree .t-name { font-weight: 600; }
+.tree .t-meta { color: var(--fg-muted); }
+.tree .t-error { color: var(--bad); }
+.tree .t-cache-read { color: var(--good); }
+.tree .t-cache-write { color: var(--warn); }
+
+/* ----------------------------------------------------------------- waste */
+
+.finding {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.8rem 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.finding-title { font-weight: 650; font-size: 14px; }
+.finding-cost { font: 600 14px var(--mono); color: var(--warn); }
+.finding p { margin: 0.35rem 0 0; font-size: 13px; color: var(--fg-muted); }
+
+.empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .topbar { align-items: flex-start; }
+  main, .status { padding: 1rem; }
+}

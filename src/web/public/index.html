@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>fyren</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"></span>
+    <div>
+      <h1>fyren</h1>
+      <p class="db" id="db-path">&nbsp;</p>
+    </div>
+  </div>
+
+  <form class="controls" id="controls" autocomplete="off">
+    <label>
+      <span>agent</span>
+      <select id="filter-name"><option value="">all runs</option></select>
+    </label>
+    <label>
+      <span>runs</span>
+      <select id="filter-limit">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="25">25</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <label class="price-as">
+      <span>price as</span>
+      <input id="filter-price-as" list="model-list" placeholder="actual rates" spellcheck="false" />
+      <datalist id="model-list"></datalist>
+    </label>
+    <button type="button" id="refresh" class="ghost" title="Reload from disk">refresh</button>
+    <label class="auto">
+      <input type="checkbox" id="auto-refresh" />
+      <span>auto</span>
+    </label>
+  </form>
+</header>
+
+<p id="status" class="status" role="status">loading…</p>
+
+<main id="main" hidden>
+  <section class="kpis" id="kpis" aria-label="Totals"></section>
+
+  <div class="banners" id="banners"></div>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" class="tab" data-tab="overview" aria-selected="true">Overview</button>
+    <button role="tab" class="tab" data-tab="runs" aria-selected="false">Runs</button>
+    <button role="tab" class="tab" data-tab="waste" aria-selected="false">Waste</button>
+  </nav>
+
+  <section class="panel" id="panel-overview" role="tabpanel">
+    <h2>Where the input tokens went</h2>
+    <p class="hint" id="composition-hint"></p>
+    <div id="composition-bar" class="stack"></div>
+    <div class="scroll-x"><table id="breakdown-table" class="data"></table></div>
+    <p class="footnote">
+      <strong>avg/run</strong> weights every run equally. <strong>pooled</strong> is the share of all
+      tokens, so a long run counts more — that is the cost-honest number.
+    </p>
+
+    <h2>Cost per run</h2>
+    <div id="trend" class="trend"></div>
+  </section>
+
+  <section class="panel" id="panel-runs" role="tabpanel" hidden>
+    <div class="scroll-x"><table id="runs-table" class="data selectable"></table></div>
+    <div id="run-detail" class="detail" hidden></div>
+  </section>
+
+  <section class="panel" id="panel-waste" role="tabpanel" hidden>
+    <h2>Avoidable spend</h2>
+    <p class="hint" id="waste-hint"></p>
+    <div id="waste-findings"></div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

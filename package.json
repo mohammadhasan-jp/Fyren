@@ -1,23 +1,44 @@
 {
   "name": "fyren-ai",
-  "version": "0.0.1",
-  "description": "fyren — a token profiler for LLM and agent developers. Local-first, zero-config. (npm package name is fyren-ai; the product is called fyren.)",
+  "version": "0.1.0",
+  "description": "A local-first token profiler for LLM and agent developers. Shows where your input tokens went — system prompt, tool definitions, history, tool results — and which of them were avoidable. Zero dependencies, no account, no server.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=22.18"
   },
-  "main": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./web": {
+      "types": "./dist/web/server.d.ts",
+      "default": "./dist/web/server.js"
+    },
+    "./package.json": "./package.json"
   },
   "bin": {
-    "fyren": "./bin/fyren.ts"
+    "fyren": "./dist/cli/bin.js"
   },
+  "files": [
+    "dist",
+    "src",
+    "!src/**/*.test.ts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false,
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "node --test",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
+    "prepack": "npm run build",
+    "fyren": "node bin/fyren.ts",
     "example": "node examples/basic-run.ts",
     "example:cost": "node examples/cost-breakdown.ts",
     "example:real": "node examples/run-real-agent.ts",
@@ -26,12 +47,31 @@
   "keywords": [
     "llm",
     "tokens",
+    "token-counter",
     "profiler",
     "observability",
+    "cost",
+    "cost-analysis",
+    "prompt-caching",
     "anthropic",
     "claude",
-    "agents"
+    "openai",
+    "gemini",
+    "ollama",
+    "agents",
+    "ai"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mohammadhasan-jp/Fyren.git"
+  },
+  "homepage": "https://github.com/mohammadhasan-jp/Fyren#readme",
+  "bugs": {
+    "url": "https://github.com/mohammadhasan-jp/Fyren/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
     "@types/node": "^22.10.0",

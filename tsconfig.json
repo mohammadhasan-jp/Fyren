@@ -23,5 +23,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "examples/**/*.ts", "test/**/*.ts", "bin/**/*.ts", "web/**/*.ts"]
+  // Every top-level source directory must be listed. A missing entry makes
+  // `tsc --noEmit` report success without checking those files at all — this
+  // has silently happened twice (test/, then bin/). See DECISIONS.md.
+  "include": ["src/**/*.ts", "examples/**/*.ts", "test/**/*.ts", "bin/**/*.ts", "scripts/**/*.ts"]
 }

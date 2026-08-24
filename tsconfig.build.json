@@ -1,0 +1,20 @@
+{
+  // The publish build. `tsconfig.json` stays `noEmit` for the dev typecheck,
+  // which covers examples/, test/ and bin/ too; this one emits only the code
+  // that actually ships.
+  //
+  // `rootDir: "src"` is what makes the published tree `dist/index.js` rather
+  // than `dist/src/index.js` — the layout a consumer expects when they open
+  // node_modules/fyren-ai to see what they installed.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "removeComments": false
+  },
+  "include": ["src/**/*.ts"]
+}

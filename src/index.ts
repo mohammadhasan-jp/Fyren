@@ -1,9 +1,15 @@
 /**
  * fyren — public surface.
  *
- * Step 1: data collection.  Step 2: cost breakdown (analysis #1 of 3).
- * Step 3: waste detection (analysis #2 of 3, pattern #1 of 3 — uncached
- * static content).
+ * Data collection, plus all three analyses: cost breakdown, waste detection
+ * (all three patterns), and version diff. Four provider adapters, all
+ * translating into the same `AnthropicLike` shape so nothing downstream has
+ * to know which one produced a call.
+ *
+ * The local web UI is NOT re-exported here — it is reachable as the
+ * `fyren-ai/web` subpath. Keeping it out means importing this library never
+ * pulls `node:http` into a consumer's bundle for a server they did not ask
+ * for.
  */
 
 export { createProfiler, Profiler, NodeHandle } from './profiler.ts';
@@ -78,7 +84,11 @@ export type {
   RunWasteReport,
   AggregateWasteReport,
   WasteFinding,
+  // All three members of the WasteFinding union, so a consumer narrowing on
+  // `finding.type` can name the branch they narrowed to.
   StaticContentWasteFinding,
+  OrphanedToolCallFinding,
+  RetriedCallFinding,
   AggregateWasteFinding,
 } from './analysis/waste-detection.ts';
 
@@ -86,7 +96,7 @@ export { diffVersions, formatVersionDiff } from './analysis/version-diff.ts';
 export type { VersionDiffResult, SegmentDelta, ToolCallFrequencyDelta } from './analysis/version-diff.ts';
 
 export { Storage } from './storage.ts';
-export type { ListRunsOptions } from './storage.ts';
+export type { ListRunsOptions, RunNameSummary } from './storage.ts';
 export { WriteQueue } from './queue.ts';
 export type { QueueOptions } from './queue.ts';
 

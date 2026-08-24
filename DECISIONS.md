@@ -285,3 +285,59 @@ Treating OpenAI's numbers additively would count every cached token twice — in
 **Decision:** the web UI starts via `fyren --ui`, not `fyren ui` or a separate `fyren-ui` bin entry.
 
 **Why:** "The CLI is one command, no subcommands" was decided and documented above for the terminal report; introducing a subcommand for the web UI would quietly reopen that decision. A boolean mode flag doesn't — it's the same one command, one entry point, doing one of two things depending on a flag, the same category of choice as `--help`. `--port` and `--no-open` follow the same flag-based shape rather than becoming `fyren ui --port` sub-flags.
+
+---
+
+## Packaging and distribution
+
+*Added for the 0.1.0 release — the first version meant to be installed by someone other than its author. Three of these reverse or widen an earlier decision; each says so explicitly rather than quietly overwriting it.*
+
+### The repo stays build-free; the published artifact is compiled
+
+**Decision:** development still runs `.ts` sources directly via Node's type stripping, with explicit `.ts` extensions on every relative import. `npm publish` ships compiled JavaScript plus `.d.ts` declarations in `dist/`, built by `scripts/build.mjs`. `package.json`'s `main`/`types`/`exports`/`bin` all point into `dist/`.
+
+**Why:** "no build step" was always a decision about *developer experience*, and it still holds there — no watch process, no codegen, no stale-output class of bug. But it was silently also acting as a decision about the *published artifact*, and there it was wrong. A package of raw `.ts` only works for a consumer who is on Node >= 22.18 **and** is not using a bundler **and** whose TypeScript tolerates `.ts` import specifiers coming out of `node_modules`. That is a small fraction of the people this tool is for, and every one of the others would hit an error that looks like fyren is broken. `tsconfig.json` had anticipated this from early on — `rewriteRelativeImportExtensions` was already switched on, with a comment reading "if we ever add a build step" — so this is the change that was planned for, not a reversal of a considered position.
+
+**The non-obvious part:** `rewriteRelativeImportExtensions` rewrites `./foo.ts` into `./foo.js` in emitted *JavaScript* but **not** in emitted *declaration files*, which keep saying `from './profiler.ts'`. Current TypeScript resolves that — verified, a consumer typechecks clean against it even with `skipLibCheck: false` — but no other package on npm looks like that, and older TypeScript and some bundlers do not handle it. So `scripts/build.mjs` rewrites the declaration files itself as a third step, then asserts that no `.ts` specifier survives anywhere in `dist/`.
+
+**Cost of this choice:** two source layouts to keep straight, and a build that can drift from the sources. Both are covered by making the build self-verifying (shebang intact, entry points present, assets copied, no `.ts` specifiers left) and by a CI job that installs the packed tarball into a clean project, runs the CLI, exercises the library, and typechecks a consumer against the published declarations with `skipLibCheck: false`.
+
+### `web/` moved into `src/web/`, and the CLI's logic into `src/cli/`
+
+**Decision:** every shipped source file now lives under `src/`. `bin/fyren.ts` remains, as a three-line shim that imports `src/cli/bin.ts`.
+
+**Why:** two concrete reasons, neither cosmetic.
+
+First, with `rootDir: "src"` the published tree is `dist/index.js` rather than `dist/src/index.js` — the layout someone expects when they open `node_modules/fyren-ai` to see what they installed. With `web/` and `bin/` outside `src/`, `rootDir` has to be the repo root and that extra path segment is unavoidable.
+
+Second, the CLI's logic living inside a `bin` entry point meant the only way to test it was to spawn a process. Moving it to `src/cli/` and leaving `bin.ts` as nothing but "call `runCli`, set an exit code" means the commands are tested by calling a function with captured output — which is why `test/cli.test.ts` can assert on exactly what was printed, and on every argument-validation failure path, without paying process startup per assertion.
+
+### The CLI has subcommands after all
+
+**Decision:** `fyren` now takes `runs`, `breakdown`, `waste`, `diff`, `ui`, and `doctor` alongside the bare summary command. This reverses "The CLI (`bin/fyren.ts`) is one command, no subcommands, in v1" and widens "`--ui` is a flag on `fyren`, not a new subcommand", both recorded above.
+
+**Why:** the original decision was a guard against a specific process risk — PRD.md names CLI/UI scope creep as the thing that stalled the predecessor project — and it was right at the time, while the analysis engine was still being built. It stopped being right once the engine was complete: the library could compute a waste report, a per-run drill-down, and a version diff that the CLI had no way to display. The tool looked less finished than it was, and the single most valuable thing it produces (`fyren waste`) was unreachable without writing code against the library.
+
+The guard against the original risk is kept structurally rather than by refusing the feature: **every subcommand is a thin printer over an analysis function that already existed and was already tested.** No command computes anything of its own, and the per-run modes reuse the same `formatX` functions the library already exported. If a proposed command needs new analysis, that analysis gets scoped and built first, on its own.
+
+**What did not change:** bare `fyren` prints exactly what it always printed, and `--ui` still works. Both shipped in a released CLI, and breaking a working invocation to tidy up the surface would cost a real user more than the inconsistency does.
+
+### An ambiguous run-id prefix is reported, never resolved
+
+**Decision:** `Storage.resolveRunId` returns `'ok'`, `'none'`, or `'ambiguous'`. Every surface taking a run argument (`fyren breakdown <run>`, `fyren waste <run>`, `GET /api/runs/<id>`) surfaces the ambiguity and asks for more characters. An exact full-id match wins even when that id also prefixes others.
+
+**Why:** prefixes have to be accepted at all, because every listing prints an 8-character prefix, and demanding the full uuid back would make the tool's own output useless as input to its next command. Given that, "just pick the most recent match" is the obvious shortcut — and it is the wrong one for this project specifically. It prints a real, plausible, correctly formatted cost breakdown *for a different run than the one the user asked about*, with nothing on screen indicating that happened. That is precisely the failure mode — being wrong in a way that looks right — that hypothetical-pricing labels, three-way `cacheSupported` reporting, and the estimated-vs-measured distinction all exist to prevent. A lookup helper does not get an exemption from the rule the rest of the codebase follows.
+
+### ANSI colour is hand-rolled, not `chalk`/`picocolors`
+
+**Decision:** `src/cli/colors.ts` emits escape codes directly, and `src/cli/format.ts` measures column widths with a `visibleLength` that strips them.
+
+**Why:** zero runtime dependencies is the constraint that makes `npx fyren-ai` install instantly, and colour is about forty lines of escape codes — a dependency for it would be the one thing making the install slower than it needs to be, for no capability gained. Colour stays off unless it is confident it will render: `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`, `--no-color`, and whether stdout is a TTY are all honoured.
+
+**The part with teeth** is not the colour, it is the padding. Cells arrive already coloured, so any alignment that measures `String.length` counts invisible escape bytes as columns, producing a table that looks correct in a captured string and ragged in an actual terminal. `test/cli-format.test.ts` asserts alignment on genuinely coloured cells, for both alignments, rather than on plain strings that would pass either way.
+
+### The web UI's cost-trend bars are drawn against zero, not against the cheapest run
+
+**Decision:** each bar's height is `cost / max`, not `(cost - min) / (max - min)`.
+
+**Why:** min-max scaling is the standard way to make a sparkline use its full height, and on this data it lies. Three runs costing $0.014250, $0.014253 and $0.014255 — i.e. effectively identical — render as an empty bar, a half bar, and a full bar, which reads as wild cost variance. For a chart whose entire job is answering "is this getting more expensive?", exaggerating a rounding difference into an apparent tripling is worse than a flat, boring row of equal bars. Zero-based is the honest baseline for a magnitude comparison.

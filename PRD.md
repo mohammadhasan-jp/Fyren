@@ -2,7 +2,7 @@
 
 Status: living document. Supersedes [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) as the source of truth for scope and priorities — that file is kept as historical record of the original planning session, in Persian, and should not be edited going forward. This document is the one to update when scope changes. Every *why* behind a technical choice lives in [DECISIONS.md](./DECISIONS.md), not here — this document says *what* and *for whom*, DECISIONS.md says *why it's built that way*.
 
-Last synced to actual code state: 2026-08-22.
+Last synced to actual code state: 2026-08-24.
 
 ---
 
@@ -92,11 +92,26 @@ Acceptance bar for calling it "done": `Profiler.versionDiff()` + a pure `diffVer
 
 **Known gap, highest priority to close:** Anthropic's cache-attribution logic (`attributeCall`, the prefix-fill algorithm, `cacheBoundaryUncertain`) is the algorithm the entire Cost Breakdown and Waste Detection analysis is built around — and it has never been run against a real Anthropic cache hit. It has been validated structurally (via Gemini, which shares the "cached tokens as an additive/subset quantity" question) but not against Anthropic itself. Closing this requires a funded `ANTHROPIC_API_KEY`; the project does not have one and has not attempted to acquire one (see AGENT.md's rules on credentials).
 
-### 6.6 CLI + local web UI
+### 6.6 CLI + local web UI — **done**, widened past the original v1 scope
 
-**CLI — done.** `bin/fyren.ts` (`npx fyren-ai` / `node bin/fyren.ts`, flags `--db`/`--limit`/`--name`/`--help`) prints a runs table, a cost trend across recent runs, and an aggregate cost breakdown, then exits — one command, no subcommands, by deliberate scope decision (see DECISIONS.md). Waste Detection output and a per-run drill-down were left out on purpose, not forgotten; they're the natural next CLI iteration.
+Both shipped first at a deliberately narrow scope (run list + cost trend + aggregate breakdown, nothing else), and both were then widened once the analysis engine was complete. The widening was a deliberate scope decision, recorded in DECISIONS.md § "The CLI has subcommands after all" — not drift. The reason: the library could compute a waste report, a per-run drill-down and a version diff that neither surface could display, so the single most valuable output the product makes (`fyren waste`) was unreachable without writing code against the library.
 
-**Web UI — done.** `fyren --ui` (`--port`, `--no-open`) starts a local `node:http` server (no framework — researched and confirmed, see DECISIONS.md) and opens the browser automatically to a page showing the same content as the CLI: a runs table, a cost trend chart, and the aggregate cost breakdown, served from one `GET /api/summary` JSON endpoint. Plain HTML/CSS/vanilla JS, no build step, no CDN dependency (a hand-rolled inline SVG chart instead of a charting library, to keep "no data leaving the machine" true without exception). Same deliberate v1 scope as the CLI: no Waste Detection view, no per-run drill-down, no auto-refresh — natural v2 additions.
+**The guard against the scope-creep risk in §8 is kept structurally rather than by refusing features: every command and every view is a thin printer over an analysis function that already existed and was already tested.** Nothing in `src/cli/` or `src/web/` computes a number of its own. A proposed feature that needs new analysis means that analysis gets scoped and built first, as its own piece of work.
+
+**CLI — done.** `fyren` (from the `fyren-ai` package) with seven commands: `summary` — the default, printing exactly what the original released CLI printed — plus `runs`, `breakdown [run]`, `waste [run]`, `diff`, `ui`, and `doctor`. Global flags `--db`, `--limit`, `--name`, `--price-as`, `--json`, `--no-color`, plus `$FYREN_DB`. The `[run]` argument accepts a run id or any unique prefix of one; an ambiguous prefix is reported rather than resolved to an arbitrary match (DECISIONS.md). `--ui` still works as a flag, for back-compatibility with the released version. `doctor` checks the four ways this tool goes quietly wrong: Node version, `node:sqlite`, runs with no composition data, and models with no pricing entry.
+
+**Web UI — done.** `fyren ui` starts the same zero-dependency `node:http` server (no framework — researched and confirmed, see DECISIONS.md) and opens a browser. Three tabs: Overview (totals, a stacked composition bar, the per-segment table, cost per run over time), Runs (clickable, opening a per-run panel with that run's breakdown, its waste findings, and its full call tree), and Waste (findings ranked by dollar impact). Live controls for name, limit and `priceAs`; optional auto-refresh for watching an agent as it runs. Endpoints: `GET /api/meta`, `GET /api/summary`, `GET /api/runs/<id-or-prefix>`. Still plain HTML/CSS/vanilla JS, no build step, and **no CDN or external request of any kind** — a hand-rolled inline SVG chart rather than a charting library, so "no data leaves the machine" holds without exception.
+
+### 6.7 Distribution — **done**
+
+Not in the original plan, and a v1 blocker in practice: a profiler nobody can install is not a profiler anyone will use.
+
+- Compiled artifact (`dist/` — JavaScript plus `.d.ts`) published as `fyren-ai`, while development stays build-free. See DECISIONS.md for why shipping raw `.ts` was wrong even though developing against it is right.
+- `fyren-ai/web` subpath export for the UI server, kept out of the main entry so importing the library never pulls `node:http` into a consumer's bundle.
+- `LICENSE` (MIT — the manifest had claimed MIT with no file present), `CHANGELOG.md`, `CONTRIBUTING.md`.
+- **CI**, closing an open risk from §8: typecheck and tests on Node 22.18 and 24 on Linux plus Node 24 on Windows; a step asserting `tsconfig.json`'s `include` covers every source directory, because a green typecheck cannot; and a job that packs the tarball, installs it into a clean project, runs the CLI, exercises the library, and typechecks a consumer against the published declarations with `skipLibCheck: false`.
+
+**Not done: the publish itself.** Everything is built, packed and install-verified, but `npm publish` has not been run — it is irreversible, public, and requires the maintainer's own npm credentials.
 
 ## 7. Success criteria for a v1 release
 
@@ -109,4 +124,4 @@ Acceptance bar for calling it "done": `Profiler.versionDiff()` + a pure `diffVer
 
 - **Untested Anthropic/OpenAI cache paths** (§6.5) — the single biggest correctness risk in the project today.
 - **Scope creep on CLI/UI** — this is explicitly the kind of large, ambiguous feature that caused the predecessor project ("JP") to stall, per the original planning notes. Both were scoped in writing before building (see the plans referenced in DECISIONS.md) and shipped at that scope, not beyond it.
-- **No CI yet.** `npm run check` is manual. Worth automating once the project has a stable enough shape that CI wouldn't just be chasing a moving target.
+- ~~**No CI yet.**~~ Closed — see §6.7. GitHub Actions runs typecheck and tests on two Node versions and two platforms, and separately verifies that the packed tarball installs and works.

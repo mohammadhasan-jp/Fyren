@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# A push that lands while an earlier run is still going makes that run's result
+# irrelevant, not worth finishing.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (node ${{ matrix.node }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22.18 is the engines floor and the interesting one: it is the oldest
+        # Node where BOTH node:sqlite and type stripping are unflagged, and
+        # where node:sqlite still emits the experimental warning src/sqlite.ts
+        # suppresses. 24.x is what most people actually run.
+        node: ['22.18', '24']
+        os: [ubuntu-latest]
+        include:
+          # The CLI does path and colour work that behaves differently on
+          # Windows, and it is the author's own platform — worth one job.
+          - node: '24'
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # Guards the thing a green typecheck cannot: that tsc was actually
+      # pointed at every source directory. A missing `include` entry makes
+      # `tsc --noEmit` report success for files it never opened, which has
+      # happened here twice.
+      - name: Assert every source directory is typechecked
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          missing=0
+          for dir in src examples test bin; do
+            if ! grep -q "\"$dir/\*\*/\*.ts\"" tsconfig.json; then
+              echo "::error::tsconfig.json's include list is missing $dir/ — tsc is not checking it"
+              missing=1
+            fi
+          done
+          exit $missing
+
+  build:
+    name: build and install the published artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run build` self-verifies the artifact (shebang intact, no .ts
+      # specifiers left, assets copied). What it cannot check is whether the
+      # tarball npm would actually publish is usable, so this installs it.
+      - name: Build and pack
+        run: |
+          npm run build
+          npm pack
+
+      - name: Install the tarball into a clean project and use it
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/fyren-ai-*.tgz
+
+          # The installed executable must run.
+          ./node_modules/.bin/fyren --version
+          ./node_modules/.bin/fyren doctor
+
+          # The library must record and read back a run.
+          cat > use.mjs <<'EOF'
+          import { createProfiler } from 'fyren-ai';
+          const p = createProfiler({ dbPath: '.fyren/runs.db' });
+          const run = p.startRun('ci-smoke');
+          const call = run.startLlmCall('claude-sonnet-5', { model: 'claude-sonnet-5' });
+          call.end({ tokens: { input: 1000, output: 50 }, model: 'claude-sonnet-5' });
+          run.end();
+          const breakdown = p.costBreakdown(run.id);
+          if (breakdown.totalCostUsd <= 0) throw new Error('installed package reported no cost');
+          p.close();
+          console.log('library ok:', breakdown.totalCostUsd);
+          EOF
+          node use.mjs
+
+          # And the CLI must see what the library just wrote.
+          ./node_modules/.bin/fyren runs | grep ci-smoke
+
+      - name: Typecheck a TypeScript consumer against the published types
+        run: |
+          cd /tmp/consumer
+          npm install --no-save typescript
+          cat > tsconfig.json <<'EOF'
+          {
+            "compilerOptions": {
+              "module": "nodenext", "moduleResolution": "nodenext",
+              "strict": true, "noEmit": true, "skipLibCheck": false,
+              "target": "ES2023", "types": []
+            },
+            "include": ["main.ts"]
+          }
+          EOF
+          cat > main.ts <<'EOF'
+          import { createProfiler, type RunCostBreakdown } from 'fyren-ai';
+          import { startWebUi } from 'fyren-ai/web';
+          const p = createProfiler({ dbPath: ':memory:' });
+          const b: RunCostBreakdown = p.costBreakdown('x');
+          const name: string = b.name;
+          void [startWebUi, name];
+          p.close();
+          EOF
+          # skipLibCheck is off on purpose: it is the strictest way a consumer
+          # can read these declarations, so it catches a broken .d.ts that a
+          # default setup would silently tolerate.
+          npx tsc -p tsconfig.json

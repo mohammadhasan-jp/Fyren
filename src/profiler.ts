@@ -13,7 +13,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { Storage, type ListRunsOptions } from './storage.ts';
+import { Storage, type ListRunsOptions, type RunNameSummary } from './storage.ts';
 import { WriteQueue, type QueueOptions } from './queue.ts';
 import { estimateCost } from './pricing.ts';
 import {
@@ -177,8 +177,12 @@ export class Profiler {
   #queue: WriteQueue;
   #enabled: boolean;
 
+  /** Where this profiler is writing. Every user-facing surface reports it, so it must not be write-only state. */
+  readonly dbPath: string;
+
   constructor(options: ProfilerOptions = {}) {
     const dbPath = options.dbPath ?? '.fyren/runs.db';
+    this.dbPath = dbPath;
     this.#enabled = options.enabled ?? true;
     this.#storage = new Storage(dbPath);
     this.#queue = new WriteQueue(this.#storage, options);
@@ -286,6 +290,18 @@ export class Profiler {
     this.flush();
     const normalized = typeof options === 'number' ? { limit: options } : options;
     return this.#storage.listRuns(normalized);
+  }
+
+  /** Distinct run names, most recently used first. Powers `--name` discovery and the web UI filter. */
+  listRunNames(): RunNameSummary[] {
+    this.flush();
+    return this.#storage.listRunNames();
+  }
+
+  /** Resolve a full run id or a unique prefix of one — see `Storage.resolveRunId`. */
+  resolveRunId(idOrPrefix: string): ReturnType<Storage['resolveRunId']> {
+    this.flush();
+    return this.#storage.resolveRunId(idOrPrefix);
   }
 
   /** Cost breakdown for one run. Pass `priceAs` for a hypothetical cost under a different model — see `CostBreakdownOptions.priceAs`. Never real spend. */

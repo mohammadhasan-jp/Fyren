@@ -104,6 +104,14 @@ export interface ListRunsOptions {
   name?: string;
 }
 
+/** One row of the run-name index the CLI's `--name` and the web UI's filter offer. */
+export interface RunNameSummary {
+  name: string;
+  runCount: number;
+  /** Epoch ms of the most recent run with this name. */
+  lastStartedAt: number;
+}
+
 export class Storage {
   #db: Database;
   #insert;
@@ -280,6 +288,45 @@ export class Storage {
             .all(options.name, limit)
     ) as unknown as NodeRow[];
     return rows.map(rowToNode);
+  }
+
+  /** Distinct run names, most recently used first — the `--name` / filter dropdown index. */
+  listRunNames(): RunNameSummary[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT name, COUNT(*) AS run_count, MAX(started_at) AS last_started_at
+           FROM nodes WHERE type = 'run'
+          GROUP BY name
+          ORDER BY last_started_at DESC`,
+      )
+      .all() as unknown as Array<{ name: string; run_count: number; last_started_at: number }>;
+    return rows.map((r) => ({ name: r.name, runCount: r.run_count, lastStartedAt: r.last_started_at }));
+  }
+
+  /**
+   * Resolve a full run id, or a unique prefix of one.
+   *
+   * Every surface that lists runs shows an 8-character prefix, so that prefix
+   * is what a user actually has to hand when they want to drill into a run —
+   * demanding the full uuid back would make the listing output useless as
+   * input to the next command. An ambiguous prefix reports itself as such
+   * rather than silently picking one: showing the wrong run's cost is exactly
+   * the class of quiet wrongness this project treats as worse than an error.
+   */
+  resolveRunId(
+    idOrPrefix: string,
+  ): { kind: 'ok'; id: string } | { kind: 'none' } | { kind: 'ambiguous'; matches: string[] } {
+    const rows = this.#db
+      .prepare("SELECT id FROM nodes WHERE type = 'run' AND id LIKE ? ORDER BY started_at DESC LIMIT 11")
+      .all(`${idOrPrefix}%`) as unknown as Array<{ id: string }>;
+
+    const first = rows[0];
+    if (first === undefined) return { kind: 'none' };
+    if (rows.length === 1) return { kind: 'ok', id: first.id };
+    // An exact full-id hit is never ambiguous, even when it prefixes others.
+    const exact = rows.find((r) => r.id === idOrPrefix);
+    if (exact) return { kind: 'ok', id: exact.id };
+    return { kind: 'ambiguous', matches: rows.map((r) => r.id) };
   }
 
   /**

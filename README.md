@@ -2,19 +2,31 @@
 
 *Pronounced "FY-ren" — rhymes with "siren".*
 
-A **profiler** for developers building with LLMs and agents — not another log dashboard.
+**A profiler for developers building with LLMs and agents — not another log dashboard.**
 
-> The npm package name is [`fyren-ai`](https://www.npmjs.com/package/fyren-ai) — `fyren` itself was blocked by npm's anti-typosquatting check (too similar to an existing unrelated package, `hygen`), and `fyren-ai` was the fastest clean alternative. The product, the CLI command, and everything else is still called `fyren`.
+[![CI](https://github.com/mohammadhasan-jp/Fyren/actions/workflows/ci.yml/badge.svg)](https://github.com/mohammadhasan-jp/Fyren/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/fyren-ai.svg)](https://www.npmjs.com/package/fyren-ai)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D22.18-informational)](#requirements)
 
-## The problem
+Your provider's dashboard tells you *how many* tokens you spent. fyren tells you **where they went
+and which of them you didn't have to spend** — how much of every request is your system prompt
+versus the user's actual question, whether your tool definitions are billing you on every call
+whether or not the tool ever fires, and whether caching was simply never switched on for content
+that never changes.
 
-If you're building an agent, you can see your total token usage — the provider's dashboard tells you that much. What it doesn't tell you is *why*: how much of every request is your system prompt versus the user's actual question, whether your tool definitions are quietly costing you on every single call whether or not the tool ever fires, or whether you forgot to enable prompt caching on content that never changes. Existing observability tools (Langfuse, Helicone, and similar) log requests and responses — useful, but they stop at "here's what happened." fyren exists to answer "where did the tokens go, and which of them didn't need to be spent."
+Everything runs on your machine. No account, no server, no data leaves your computer unless you
+point it at a hosted model yourself. Zero runtime dependencies, zero native modules.
 
-It runs entirely on your machine: no account, no server, no data leaving your computer unless you point it at a hosted model yourself.
+```bash
+npx fyren-ai            # the whole tool, no install
+```
+
+---
 
 ## What it actually shows you
 
-Real output, from a small local agent answering a documentation question (full walkthrough in [Real agents](#real-agents)):
+Real output from a small local agent answering a documentation question:
 
 ```
 input breakdown (ESTIMATED from character counts):
@@ -22,97 +34,43 @@ input breakdown (ESTIMATED from character counts):
   tool definitions      33.5%    418
   system prompt         60.2%    751
   conversation history  4.6%     57
-  latest message        1.7%     21     ← this is the user's actual question
+  latest message        1.7%     21     ← the user's actual question
 ```
 
-93.7% of every request is fixed overhead resent unchanged on every call; the user's real question is 1.7%. fyren's second analysis, [Waste Detection](#analysis-2--waste-detection), turns that into a concrete number: if this run had been on a provider that supports prompt caching and the system prompt weren't being resent uncached, that's real, avoidable dollars — shown as such, never guessed at.
+93.7% of every request is fixed overhead, resent unchanged on every call. The user's real question
+is 1.7%. Then `fyren waste` turns that into a number you can act on:
+
+```
+⚠ "system prompt" uncached in 4 of 4 run(s) — 1,707 avoidable tokens, $0.004609 total.
+⚠ "search" orphaned in 4 of 4 run(s), 4 occurrence(s) — $0.003733 of wasted LLM cost.
+  total avoidable: $0.008342
+```
+
+Existing tools (Langfuse, Helicone, and similar) log requests and responses — useful, but they stop
+at "here's what happened." fyren exists to answer *"where did the tokens go, and which of them
+didn't need to be spent."*
+
+## Install
+
+```bash
+npm install fyren-ai        # as a library
+npm install -g fyren-ai     # or for the `fyren` command everywhere
+npx fyren-ai                # or don't install it at all
+```
+
+> **Why `fyren-ai` and not `fyren`?** npm's anti-typosquatting filter blocked the unscoped name
+> (too close to an existing unrelated package, `hygen`). The product, the CLI command, and
+> everything else is still called `fyren`.
 
 ## Quick start
 
-```bash
-# the npm name is reserved (fyren-ai@0.0.1) but the real package isn't published
-# yet — clone this repo locally, then:
-npm install
-
-npm run example        # records a fake agent run and reads it back — no network, no cost
-npm run example:cost   # the cost breakdown, on that same mock run
-npm run check          # typecheck + 192 tests
-
-npm run example:ollama                              # the real thing — free, local, no key needed
-ANTHROPIC_API_KEY=sk-ant-... npm run example:real    # the real thing — hosted, a few cents
-
-node bin/fyren.ts             # terminal summary: recent runs, cost trend, cost breakdown
-node bin/fyren.ts --ui        # same content, in a browser — starts a local server, opens it for you
-node bin/fyren.ts --help      # --db / --limit / --name / --ui / --port / --no-open
-```
-
-Full explanation of the two real (non-mock) runs in [Real agents](#real-agents).
-
----
-
-## Status
-
-| Step | State |
-|---|---|
-| 1 — data collection | done |
-| 2 — analysis #1, cost breakdown (+ hypothetical pricing) | done |
-| 3 — analysis #2, waste detection — all 3 patterns | done |
-| Providers: Anthropic, OpenAI, Gemini, Ollama | done |
-| Analysis #3 (version diff) | done |
-| CLI (`bin/fyren.ts`) | done |
-| Web UI (`fyren --ui`) | done |
-
-| Piece | File |
-|---|---|
-| Data model (the run **tree**) | `src/types.ts` |
-| SQLite storage (+ schema migration) | `src/storage.ts` |
-| Non-blocking write buffer | `src/queue.ts` |
-| Tree bookkeeping + public API | `src/profiler.ts` |
-| SQLite loader (unflagged-warning handling) | `src/sqlite.ts` |
-| Anthropic wrapper (+ precise mode) | `src/providers/anthropic.ts` |
-| **OpenAI wrapper** | `src/providers/openai.ts` |
-| **Gemini wrapper** | `src/providers/gemini.ts` |
-| Ollama wrapper | `src/providers/ollama.ts` |
-| Shared OpenAI-compatible translation | `src/providers/openai-compat.ts` |
-| Pricing table / cost estimate (per-model cache multipliers) | `src/pricing.ts` |
-| **Cost breakdown** (+ `priceAs` hypothetical pricing) | `src/analysis/cost-breakdown.ts` |
-| **Waste detection** | `src/analysis/waste-detection.ts` |
-| **Version diff** | `src/analysis/version-diff.ts` |
-| Real doc Q&A agent (provider-agnostic) | `examples/doc-qa-agent.ts` |
-| Driver — real Anthropic API | `examples/run-real-agent.ts` |
-| Driver — real local Ollama | `examples/run-ollama-agent.ts` |
-| **CLI** (runs table, cost trend, cost breakdown) | `bin/fyren.ts` |
-| **Web UI** server (zero-dependency `node:http`) | `web/server.ts` |
-| Web UI static frontend (vanilla HTML/CSS/JS, no build step) | `web/public/` |
-| Cross-platform browser auto-open | `web/open-browser.ts` |
-
-## Requirements
-
-Node **>= 22.18**. No runtime dependencies for the core library — `@anthropic-ai/sdk` is a devDependency used only by `examples/run-real-agent.ts`, never imported from `src/`.
-
-Two floors, and the higher one wins:
-
-- `node:sqlite` is unflagged from **22.13**
-- native TypeScript execution (type stripping) is unflagged from **22.18**
-
-Since fyren ships TypeScript source with no build step, 22.18 is the real floor. Verified by running the suite on both: 22.13 discovers 0 test files, 22.18 runs all 192.
-
-**About the SQLite experimental warning.** `node:sqlite` is Stability 1.1 ("active development") on Node 22 and 1.2 ("release candidate") on Node 24.15+. On Node 22 it prints, once:
-
-```
-ExperimentalWarning: SQLite is an experimental feature and might change at any time
-```
-
-A profiler has no business printing that into somebody else's agent logs, and `--no-warnings` is too blunt — it would hide the user's own warnings too. So `src/sqlite.ts` swaps `process.emitWarning` for exactly the duration of the module load, drops that one message, and restores the original. Node 24 never emits it in the first place. Set `FYREN_NODE_WARNINGS=1` to see it.
-
-## Usage
+Wrap the client you already have. Your agent code doesn't change.
 
 ```ts
-import { createProfiler, wrapAnthropic, formatCostBreakdown } from 'fyren-ai'; // npm package name — see note above
 import Anthropic from '@anthropic-ai/sdk';
+import { createProfiler, wrapAnthropic } from 'fyren-ai';
 
-const profiler = createProfiler({ dbPath: '.fyren/runs.db' });
-const anthropic = new Anthropic();
+const profiler = createProfiler();          // writes .fyren/runs.db
 
 const runId = await profiler.run('my-agent', async (run) => {
   await run.step('plan', async (step) => {
@@ -127,11 +85,210 @@ const runId = await profiler.run('my-agent', async (run) => {
   return run.rootId;
 });
 
-console.log(formatCostBreakdown(profiler.costBreakdown(runId)));
 profiler.close();
 ```
 
-`wrapAnthropic` returns a Proxy, so every SDK method you do not touch keeps working. `messages.create` and `messages.stream` are instrumented.
+Then look at it:
+
+```bash
+fyren                    # runs, cost trend, where the tokens went
+fyren waste              # what it cost you that it didn't have to
+fyren ui                 # the same thing in a browser
+```
+
+`wrapAnthropic` returns a Proxy, so every SDK method you don't touch keeps working untouched.
+`messages.create` and `messages.stream` are instrumented. Despite the name it is provider-generic
+— OpenAI, Gemini and Ollama all go through it (see [Providers](#providers)).
+
+**Nothing you send is ever stored.** fyren records *sizes* per segment, never prompt or
+tool-result text. That is a firm boundary, not a v1 shortcut — it bounds what the analysis can
+ever claim to detect, and shaped two of the three waste patterns.
+
+## The CLI
+
+```
+fyren [command] [options]
+
+  summary              Runs table, cost trend, aggregate breakdown   (default)
+  runs                 Just the table of recent runs
+  breakdown [run]      Where the input tokens went — all runs, or one
+  waste [run]          Avoidable spend — all runs, or one
+  diff                 Compare two sets of runs (--before / --after)
+  ui                   Open the local web UI in a browser
+  doctor               Check the environment, database, and pricing coverage
+```
+
+`[run]` is a run id **or any unique prefix of one** — the same 8-character prefix every listing
+prints. An ambiguous prefix is reported, never resolved to an arbitrary match.
+
+| Option | |
+|---|---|
+| `--db <path>` | Runs database (default `.fyren/runs.db`, or `$FYREN_DB`) |
+| `--limit <n>` | Recent runs to include (default 10) |
+| `--name <agent>` | Only runs with this exact name |
+| `--price-as <model>` | Re-price these runs at another model's rates — always labelled hypothetical |
+| `--json` | Machine-readable output, on every reporting command |
+| `--no-color` | Disable ANSI colour (also honours `NO_COLOR` / `FORCE_COLOR`) |
+| `--port`, `--no-open` | `ui`: port, and whether to open a browser |
+| `--before`, `--after` | `diff`: the two run names to compare |
+
+Two worth knowing about:
+
+**`fyren breakdown <run>`** drills into a single run and prints its whole call tree, so
+"60% of your input is the system prompt" becomes "and here are the four calls that resent it":
+
+```
+CALL TREE
+run  research-agent  ok  118ms
+|- step  plan  ok  25ms
+|  `- llm_call  claude-opus-5  ok  in 374 / out 40  cache-write 353  $0.003311  25ms
+|- step  execute  ok  61ms
+|  |- tool_call  search  ok  31ms
+|  |  `- llm_call  claude-haiku-4-5  ok  in 689 / out 47  cache-write 13  $0.000927  30ms
+|  `- tool_call  search  ok  30ms
+|     `- llm_call  claude-haiku-4-5  ok  in 710 / out 47  cache-read 13   $0.000933  30ms
+`- step  answer  ok  31ms
+   `- llm_call  claude-opus-5  ok  in 1,949 / out 37  cache-read 353  $0.009081  31ms
+```
+
+**`fyren doctor`** answers "is this actually working, and can it trust its own numbers?" — it
+checks the Node version, `node:sqlite`, the database, whether your runs carry composition data at
+all, whether sizes are measured or estimated, and whether every model it saw has a pricing entry.
+Those are the four ways this tool goes quietly wrong, and all four look like "it works, the
+numbers are just small" from the outside.
+
+## The web UI
+
+```bash
+fyren ui                 # starts a local server, opens your browser
+fyren ui --port 4000 --no-open
+```
+
+Three tabs over the same data the CLI prints:
+
+- **Overview** — totals, a stacked bar of where input tokens went, the per-segment table, and cost
+  per run over time.
+- **Runs** — every run, clickable. Opening one shows its segment breakdown, its waste findings, and
+  its full call tree.
+- **Waste** — every finding, ranked by dollar impact, each explaining what to actually do about it.
+
+Live controls for agent name, how many runs to include, and hypothetical pricing; plus an optional
+auto-refresh for watching an agent fill the table as it runs.
+
+Plain HTML/CSS/vanilla JS, no build step, **no CDN and no external requests** — a hand-rolled
+inline SVG chart rather than a charting library, so "no data leaves the machine" stays true
+without an asterisk.
+
+## Requirements
+
+**Node ≥ 22.18.** No runtime dependencies — the core library imports nothing but Node built-ins.
+`@anthropic-ai/sdk` is a devDependency used only by `examples/`, never by `src/`.
+
+The floor comes from `node:sqlite`, which fyren uses instead of `better-sqlite3` specifically so
+that installing this never makes you wait for a C++ build. It is unflagged from 22.13; 22.18 is
+the floor because that is what is actually verified in CI, and because the repo's own development
+flow (running `.ts` sources directly via type stripping) needs it.
+
+**Development is build-free; the published package is compiled.** Working on fyren needs no build
+step — Node runs the TypeScript directly. But shipping raw `.ts` would only work for consumers on
+Node ≥ 22.18 who aren't using a bundler, so `npm publish` ships compiled JavaScript plus `.d.ts`
+declarations in `dist/`. CI installs the resulting tarball into a clean project and type-checks a
+consumer against it with `skipLibCheck: false`, so "it works when installed" is tested, not
+assumed.
+
+**About the SQLite experimental warning.** `node:sqlite` is Stability 1.1 on Node 22 and 1.2
+("release candidate") on Node 24.15+. On Node 22 it prints, once:
+
+```
+ExperimentalWarning: SQLite is an experimental feature and might change at any time
+```
+
+A profiler has no business printing that into somebody else's agent logs, and `--no-warnings` is
+too blunt — it would hide your warnings too. So `src/sqlite.ts` swaps `process.emitWarning` for
+exactly the duration of the module load, drops that one message, and restores the original. Node
+24 never emits it. Set `FYREN_NODE_WARNINGS=1` to see it.
+
+## Status
+
+Everything in the v1 scope is built.
+
+| | |
+|---|---|
+| Data collection | done |
+| Analysis #1 — cost breakdown (+ hypothetical pricing) | done |
+| Analysis #2 — waste detection, all 3 patterns | done |
+| Analysis #3 — version diff | done |
+| Providers: Anthropic, OpenAI, Gemini, Ollama | done |
+| CLI — 7 commands, `--json`, colour | done |
+| Web UI — overview, drill-down, waste | done |
+| Packaged for npm as `fyren-ai` — built, packed, and install-verified | done |
+| Anthropic cache attribution verified against a *live* Anthropic cache hit | **not yet** — see [`npm run example:real`](#npm-run-examplereal--hosted-claude-haiku-45-a-few-cents) |
+
+| Piece | File |
+|---|---|
+| Data model (the run **tree**) | `src/types.ts` |
+| SQLite storage (+ schema migration) | `src/storage.ts` |
+| Non-blocking write buffer | `src/queue.ts` |
+| Tree bookkeeping + public API | `src/profiler.ts` |
+| SQLite loader (unflagged-warning handling) | `src/sqlite.ts` |
+| Anthropic wrapper (+ precise mode) | `src/providers/anthropic.ts` |
+| OpenAI wrapper | `src/providers/openai.ts` |
+| Gemini wrapper | `src/providers/gemini.ts` |
+| Ollama wrapper | `src/providers/ollama.ts` |
+| Shared OpenAI-compatible translation | `src/providers/openai-compat.ts` |
+| Pricing table / cost estimate (per-model cache multipliers) | `src/pricing.ts` |
+| Cost breakdown (+ `priceAs` hypothetical pricing) | `src/analysis/cost-breakdown.ts` |
+| Waste detection | `src/analysis/waste-detection.ts` |
+| Version diff | `src/analysis/version-diff.ts` |
+| CLI — dispatch, commands, colour, formatting | `src/cli/` |
+| Web UI server (zero-dependency `node:http`) | `src/web/server.ts` |
+| Web UI frontend (vanilla HTML/CSS/JS, no build step) | `src/web/public/` |
+| Real doc Q&A agent (provider-agnostic) | `examples/doc-qa-agent.ts` |
+| Drivers — real Anthropic / real local Ollama | `examples/run-real-agent.ts`, `examples/run-ollama-agent.ts` |
+
+## Library API
+
+Everything the CLI and UI do is available programmatically — they compute nothing of their own.
+
+```ts
+import { createProfiler } from 'fyren-ai';
+
+const profiler = createProfiler({ dbPath: '.fyren/runs.db' });
+
+profiler.costBreakdown(runId);                    // one run: where the tokens went
+profiler.aggregateCostBreakdown({ limit: 20 });   // across many runs
+profiler.wasteReport(runId);                      // one run: what was avoidable
+profiler.aggregateWasteReport({ limit: 20 });     // across many runs
+profiler.versionDiff({ before: { name: 'v1' }, after: { name: 'v2' } });
+
+profiler.listRuns({ limit: 10, name: 'my-agent' });
+profiler.listRunNames();                          // distinct agent names
+profiler.resolveRunId('3f9c1a2b');                // prefix → full id
+profiler.getTree(runId);                          // the raw run tree
+```
+
+Each analysis has a matching `format*` function (`formatCostBreakdown`, `formatWasteReport`,
+`formatVersionDiff`, …) that returns the same plain string the CLI prints. Pass
+`{ priceAs: 'claude-haiku-4-5' }` to any of them to re-price real token counts under another
+model — the result is double-labelled as hypothetical and can never be mistaken for real spend.
+
+The web server is a subpath export, kept out of the main entry so importing the library never
+pulls `node:http` into your bundle:
+
+```ts
+import { startWebUi } from 'fyren-ai/web';
+const ui = await startWebUi({ dbPath: '.fyren/runs.db', port: 4000 });
+```
+
+## Development
+
+```bash
+git clone https://github.com/mohammadhasan-jp/Fyren.git
+cd Fyren && npm install
+npm run check           # typecheck + 232 tests
+```
+
+No build step, no watch process, no codegen. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Providers
 
@@ -457,7 +614,7 @@ fyren works fully with Anthropic today in every other respect — real instrumen
 
 ## Tests
 
-`npm test` — 192 tests, no network, no API key, run with Node's built-in runner.
+`npm test` — 232 tests, no network, no API key, run with Node's built-in runner.
 
 | File | Covers |
 |---|---|
@@ -470,10 +627,19 @@ fyren works fully with Anthropic today in every other respect — real instrumen
 | **`test/openai.test.ts`** | cached tokens subtracted out of `prompt_tokens` (not added), `cache_write_tokens` on GPT-5.6+, Responses-API field aliases, reasoning tokens never inflating output, clamping on inconsistent provider numbers, `prompt_cache_key`, auth/error paths |
 | **`test/gemini.test.ts`** | the non-OpenAI-compatible translation (role `"model"`, `systemInstruction`, `functionDeclarations`, object-valued `args`, name-keyed `functionResponse`), synthesized call ids, the `countTokens` wrapper form, **and the real captured cache-hit response from a live `gemini-3.7-flash` call** |
 | `test/waste-detection.test.ts` | pattern #1 (single-call runs produce nothing, legitimate size changes don't false-positive, only `system`/`toolDefs` are checked, genuine caching suppresses the finding fully and partially, the character-vs-drifting-token-estimate regression, `cacheSupport: 'no'`); **pattern #2 (a later `llm_call` anywhere in the run un-orphans a tool call, a still-`running` run is never flagged, cross-step usage counts, nested LLM cost on an orphaned call is priced, a pure-function tool is still flagged at $0, grouping by tool name)**; `priceAs` on both patterns, aggregation ranked by dollar impact, end-to-end through a real `Profiler` including a real hit-iteration-cap scenario |
+| `test/version-diff.test.ts` | before/after segment deltas, tool-call frequency deltas, incomparable pricing bases refusing to present a cost delta |
+| `test/web-ui.test.ts` | a real server on a real port: `/api/summary`, `/api/meta`, per-run drill-down and prefix resolution, `?priceAs`/`?name`/`?limit` overrides, JSON 404s, path traversal, idempotent shutdown |
+| `test/cli.test.ts` | every subcommand against a real database, run-id prefix resolution, **ambiguous prefixes refusing to guess**, `--json` on every reporting command, `--price-as` labelling, `$FYREN_DB`, and each argument-validation failure path |
+| `test/cli-format.test.ts` | colour enabled only when it will render (`NO_COLOR`/`FORCE_COLOR`/`TERM=dumb`/TTY), and column alignment measured in *visible* width so coloured cells do not skew it |
+| `test/storage-index.test.ts` | `listRunNames` grouping and ordering, `resolveRunId` on full ids, prefixes, misses, ambiguity, and ids that prefix other ids |
 
 ## Next
 
-Everything in the original v1 scope is built: all three Waste Detection patterns, Version Diff, both providers-of-provenance, the CLI, and the Web UI — see the [Status](#status) table above. What's left is verification depth, not missing features: Anthropic's cache-attribution math against a real Anthropic cache hit (see [`npm run example:real`](#npm-run-examplereal--hosted-claude-haiku-45-a-few-cents) above) is the one open item, and OpenAI is likewise mock-only so far. Full scope and acceptance criteria in [PRD.md](./PRD.md), not repeated here.
+Everything in the v1 scope is built — all three Waste Detection patterns, Version Diff, four providers, the CLI, and the web UI. See the [Status](#status) table above.
+
+What is left is **verification depth, not missing features**. One item, and it is the important one: Anthropic's cache-attribution math — the algorithm the entire Cost Breakdown and Waste Detection analysis is built around — has never been run against a real Anthropic cache hit. It is validated structurally via Gemini, which shares the same "are cached tokens additive or a subset" question, but not against its primary provider. OpenAI is likewise mock-only. Closing this needs a funded API key; see [`npm run example:real`](#npm-run-examplereal--hosted-claude-haiku-45-a-few-cents) above — it costs a few cents and closes the gap immediately.
+
+Full scope and acceptance criteria live in [PRD.md](./PRD.md), not here.
 
 ## More docs
 
