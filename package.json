@@ -1,6 +1,6 @@
 {
   "name": "fyren-ai",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Find where your LLM tokens and cost actually go — and which of them were avoidable. Token cost profiler for Claude, OpenAI, Gemini, Ollama and Vercel AI SDK agents. Detects missing prompt caching, wasted tool output and retries. Local CLI + web UI, zero dependencies.",
   "type": "module",
   "license": "MIT",
