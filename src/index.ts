@@ -56,6 +56,24 @@ export type {
 } from './providers/gemini.ts';
 
 export {
+  fyrenMiddleware,
+  tokensFromAiSdkUsage,
+  analyzeAiSdkComposition,
+  extractAiSdkSegments,
+  conventionFor,
+} from './providers/ai-sdk.ts';
+export type {
+  FyrenMiddleware,
+  AiSdkMiddlewareOptions,
+  AiSdkCallOptions,
+  AiSdkModelLike,
+  AiSdkNestedUsage,
+  AiSdkFlatUsage,
+  CachedTokenConvention,
+  UsageMappingOptions,
+} from './providers/ai-sdk.ts';
+
+export {
   costBreakdown,
   aggregateCostBreakdown,
   formatCostBreakdown,

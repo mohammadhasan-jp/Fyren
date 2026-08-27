@@ -1,7 +1,7 @@
 {
   "name": "fyren-ai",
   "version": "0.1.3",
-  "description": "A local-first token profiler for LLM and agent developers. Shows where your input tokens went — system prompt, tool definitions, history, tool results — and which of them were avoidable. Zero dependencies, no account, no server.",
+  "description": "Find where your LLM tokens and cost actually go — and which of them were avoidable. Token cost profiler for Claude, OpenAI, Gemini, Ollama and Vercel AI SDK agents. Detects missing prompt caching, wasted tool output and retries. Local CLI + web UI, zero dependencies.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -41,24 +41,31 @@
     "example": "node examples/basic-run.ts",
     "example:cost": "node examples/cost-breakdown.ts",
     "example:real": "node examples/run-real-agent.ts",
-    "example:ollama": "node examples/run-ollama-agent.ts"
+    "example:ollama": "node examples/run-ollama-agent.ts",
+    "example:ai-sdk": "node examples/ai-sdk-agent.ts"
   },
   "keywords": [
     "llm",
-    "tokens",
+    "llm-cost",
+    "llm-observability",
+    "token-usage",
     "token-counter",
-    "profiler",
-    "observability",
-    "cost",
-    "cost-analysis",
+    "tokens",
+    "cost-tracking",
+    "cost-optimization",
     "prompt-caching",
+    "ai-sdk",
+    "vercel-ai-sdk",
+    "ai-agents",
+    "agents",
     "anthropic",
     "claude",
     "openai",
     "gemini",
     "ollama",
-    "agents",
-    "ai"
+    "observability",
+    "profiler",
+    "cli"
   ],
   "repository": {
     "type": "git",
@@ -72,8 +79,11 @@
     "access": "public"
   },
   "devDependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.72",
     "@anthropic-ai/sdk": "^0.117.1",
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "ai": "^7.0.79",
+    "typescript": "^5.7.0",
+    "zod": "^4.4.3"
   }
 }

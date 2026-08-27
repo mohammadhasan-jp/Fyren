@@ -1,8 +1,7 @@
-# fyren
+# fyren — find where your LLM tokens and cost actually go
 
-*Pronounced "FY-ren" — rhymes with "siren".*
-
-**A profiler for developers building with LLMs and agents — not another log dashboard.**
+**A token cost profiler for Claude, OpenAI, Gemini, Ollama and Vercel AI SDK agents — not another
+log dashboard.**
 
 [![CI](https://github.com/mohammadhasan-jp/Fyren/actions/workflows/ci.yml/badge.svg)](https://github.com/mohammadhasan-jp/Fyren/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/fyren-ai.svg)](https://www.npmjs.com/package/fyren-ai)
@@ -12,11 +11,13 @@
 Your provider's dashboard tells you *how many* tokens you spent. fyren tells you **where they went
 and which of them you didn't have to spend** — how much of every request is your system prompt
 versus the user's actual question, whether your tool definitions are billing you on every call
-whether or not the tool ever fires, and whether caching was simply never switched on for content
-that never changes.
+whether or not the tool ever fires, and whether prompt caching was simply never switched on for
+content that never changes.
 
 Everything runs on your machine. No account, no server, no data leaves your computer unless you
 point it at a hosted model yourself. Zero runtime dependencies, zero native modules.
+
+*Pronounced "FY-ren" — rhymes with "siren".*
 
 ```bash
 npx fyren-ai            # the whole tool, no install
@@ -46,9 +47,11 @@ is 1.7%. Then `fyren waste` turns that into a number you can act on:
   total avoidable: $0.008342
 ```
 
-Existing tools (Langfuse, Helicone, and similar) log requests and responses — useful, but they stop
-at "here's what happened." fyren exists to answer *"where did the tokens go, and which of them
-didn't need to be spent."*
+**How this differs from Langfuse, Helicone and the other LLM observability tools.** They log
+requests and responses — useful, but they stop at "here's what happened", and most of them want a
+server, an account and your prompt text. fyren answers a narrower question they don't:
+*"where did the tokens go, and which of them didn't need to be spent."* It runs as a CLI on your
+machine, stores segment **sizes** and never prompt text, and needs neither a container nor a signup.
 
 ## Install
 
@@ -142,6 +145,71 @@ hosted model — always labelled as hypothetical, never presented as real spend:
 ```bash
 npx fyren waste --price-as claude-haiku-4-5
 ```
+
+### Using the Vercel AI SDK? Use the middleware instead
+
+If your agent is built on the [AI SDK](https://ai-sdk.dev) (`generateText`, `streamText`, `ai`), there
+is no client for fyren to wrap — the request is assembled inside the SDK. So fyren plugs into the
+SDK's own interception point instead, and your agent code still does not change:
+
+```ts
+import { generateText, wrapLanguageModel } from 'ai';
+import { anthropic } from '@ai-sdk/anthropic';
+import { createProfiler, fyrenMiddleware } from 'fyren-ai';
+
+const profiler = createProfiler();
+
+await profiler.run('my-agent', async (run) => {
+  const model = wrapLanguageModel({
+    model: anthropic('claude-sonnet-5'),
+    middleware: fyrenMiddleware(run),          // ← the only new line
+  });
+
+  const { text } = await generateText({
+    model,
+    system: 'You are a helpful assistant.',
+    prompt: 'What is the capital of France?',
+  });
+
+  console.log(text);
+});
+
+profiler.close();
+```
+
+`streamText` works the same way — the node settles when the stream finishes, since usage only
+arrives on the final part. Then `npx fyren waste` as usual.
+
+**One middleware per node.** `fyrenMiddleware(run)` records under `run`; inside a `step`, pass the
+step instead, and that subtree is where those calls appear in the tree.
+
+**Older `ai` releases.** The middleware contract is versioned, and that version is a *type-level tag
+only* — `wrapLanguageModel` never reads it at runtime. One implementation therefore satisfies all
+three; if your `ai` release wants `v3` or `v2`, say so and nothing else changes:
+
+```ts
+fyrenMiddleware(run, { specificationVersion: 'v3' });
+```
+
+**Cached tokens, and the one place this can be ambiguous.** On the current usage shape (spec v3/v4)
+the AI SDK has already normalised every provider onto the same meaning of "fresh input", so fyren
+reads it straight across with no arithmetic of its own — which makes this the safest cache
+accounting in the package. The older *flat* usage shape (the `ai` v5 line) is genuinely ambiguous:
+Anthropic's `inputTokens` excludes cached tokens while OpenAI's includes them, and no arithmetic on
+two numbers can tell you which. fyren decides from the provider id and records what it assumed;
+override it for a gateway it doesn't know:
+
+```ts
+fyrenMiddleware(run, { cachedInputTokensAre: 'subset' });   // or 'additive'
+```
+
+**What is not available here:** `precise: true`. Measuring segments needs the provider's
+token-counting endpoint, and a middleware only holds a `doGenerate` closure. Segment sizes are
+character estimates, and every report says so — exactly as it does for any other estimated run.
+
+A full runnable agent — real `generateText` + `streamText`, a real tool, a real local model, no key
+and no cost — is [`examples/ai-sdk-agent.ts`](./examples/ai-sdk-agent.ts) (`npm run example:ai-sdk`,
+needs Ollama).
 
 ### Other providers
 
@@ -264,7 +332,10 @@ without an asterisk.
 ## Requirements
 
 **Node ≥ 22.18.** No runtime dependencies — the core library imports nothing but Node built-ins.
-`@anthropic-ai/sdk` is a devDependency used only by `examples/`, never by `src/`.
+`@anthropic-ai/sdk`, `ai`, `zod` and `@ai-sdk/openai-compatible` are devDependencies used only by
+`examples/`, never by `src/`. In particular the AI SDK middleware is typed structurally, exactly
+like every other adapter here, so installing fyren never pulls `ai` in — and never pins you to a
+version of it.
 
 The floor comes from `node:sqlite`, which fyren uses instead of `better-sqlite3` specifically so
 that installing this never makes you wait for a C++ build. It is unflagged from 22.13; 22.18 is
@@ -301,6 +372,7 @@ Everything in the v1 scope is built.
 | Analysis #2 — waste detection, all 3 patterns | done |
 | Analysis #3 — version diff | done |
 | Providers: Anthropic, OpenAI, Gemini, Ollama | done |
+| Vercel AI SDK — `wrapLanguageModel` middleware, generate + stream | done |
 | CLI — 7 commands, `--json`, colour | done |
 | Web UI — overview, drill-down, waste | done |
 | Packaged for npm as `fyren-ai` — built, packed, and install-verified | done |
@@ -318,6 +390,7 @@ Everything in the v1 scope is built.
 | Gemini wrapper | `src/providers/gemini.ts` |
 | Ollama wrapper | `src/providers/ollama.ts` |
 | Shared OpenAI-compatible translation | `src/providers/openai-compat.ts` |
+| Vercel AI SDK middleware | `src/providers/ai-sdk.ts` |
 | Pricing table / cost estimate (per-model cache multipliers) | `src/pricing.ts` |
 | Cost breakdown (+ `priceAs` hypothetical pricing) | `src/analysis/cost-breakdown.ts` |
 | Waste detection | `src/analysis/waste-detection.ts` |
@@ -367,14 +440,14 @@ const ui = await startWebUi({ dbPath: '.fyren/runs.db', port: 4000 });
 ```bash
 git clone https://github.com/mohammadhasan-jp/Fyren.git
 cd Fyren && npm install
-npm run check           # typecheck + 232 tests
+npm run check           # typecheck + 273 tests
 ```
 
 No build step, no watch process, no codegen.
 
 ## Providers
 
-Four today, all going through the same instrumentation (`wrapAnthropic` — see [Design notes](#design-notes) for why one function covers all of them):
+Four today, all going through the same instrumentation (`wrapAnthropic` — see [Design notes](#design-notes) for why one function covers all of them). If you reach these through the **Vercel AI SDK** rather than their own SDKs, use [`fyrenMiddleware`](#using-the-vercel-ai-sdk-use-the-middleware-instead) instead of the table below — it covers every provider the AI SDK does, including ones fyren has no adapter for.
 
 | | Anthropic | OpenAI | Gemini | Ollama |
 |---|---|---|---|---|
@@ -696,7 +769,7 @@ fyren works fully with Anthropic today in every other respect — real instrumen
 
 ## Tests
 
-`npm test` — 232 tests, no network, no API key, run with Node's built-in runner.
+`npm test` — 273 tests, no network, no API key, run with Node's built-in runner.
 
 | File | Covers |
 |---|---|
@@ -706,6 +779,7 @@ fyren works fully with Anthropic today in every other respect — real instrumen
 | `test/cost-breakdown.test.ts` | shares sum to 1, costs sum to real input cost, prefix cache attribution, interleaved zone, unattributed calls, aggregation, cache-boundary-uncertain detection, `cacheSupport` yes/no/mixed reporting, `priceAs` re-pricing (tokens/shares untouched, real cache multipliers still applied, unknown-model handling), the `HYPOTHETICAL` banner, aggregate `pricingMode` yes/no/mixed, end-to-end through a real `Profiler` |
 | `test/pricing.test.ts` | model-id/provider-prefix normalization, unknown models, **per-model cache multipliers (OpenAI's free-write vs 1.25x, GPT-4.1's 0.25x read discount), Gemini's storage-per-hour field, context-length tiers switching rate mid-calculation** |
 | `test/ollama.test.ts` | request/response translation pinned against real captured Ollama JSON, the tool_result round trip, HTTP client (stubbed `fetch`, no real network) |
+| **`test/ai-sdk.test.ts`** | AI SDK segmentation (system inside `prompt[]`, a trailing system message not stealing `latest`, every arm of the `tool-result` output union, file parts), the nested-usage mapping read straight across, the flat-usage Anthropic-vs-OpenAI convention split, and `wrapGenerate`/`wrapStream` end to end through a real `Profiler` — chunks passed through untouched, an `error` part failing the call, a mid-flight rejection still settling the node |
 | **`test/openai.test.ts`** | cached tokens subtracted out of `prompt_tokens` (not added), `cache_write_tokens` on GPT-5.6+, Responses-API field aliases, reasoning tokens never inflating output, clamping on inconsistent provider numbers, `prompt_cache_key`, auth/error paths |
 | **`test/gemini.test.ts`** | the non-OpenAI-compatible translation (role `"model"`, `systemInstruction`, `functionDeclarations`, object-valued `args`, name-keyed `functionResponse`), synthesized call ids, the `countTokens` wrapper form, **and the real captured cache-hit response from a live `gemini-3.7-flash` call** |
 | `test/waste-detection.test.ts` | pattern #1 (single-call runs produce nothing, legitimate size changes don't false-positive, only `system`/`toolDefs` are checked, genuine caching suppresses the finding fully and partially, the character-vs-drifting-token-estimate regression, `cacheSupport: 'no'`); **pattern #2 (a later `llm_call` anywhere in the run un-orphans a tool call, a still-`running` run is never flagged, cross-step usage counts, nested LLM cost on an orphaned call is priced, a pure-function tool is still flagged at $0, grouping by tool name)**; `priceAs` on both patterns, aggregation ranked by dollar impact, end-to-end through a real `Profiler` including a real hit-iteration-cap scenario |
